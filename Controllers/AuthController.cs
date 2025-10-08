@@ -1,8 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using MedicalCenter.API.Data;
 using MedicalCenter.API.Models.DTOs;
-using MedicalCenter.API.Models.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System;
@@ -58,9 +56,7 @@ public class AuthController : ControllerBase
         {
             new Claim(JwtRegisteredClaimNames.Sub, empleado.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.GivenName, empleado.Nombre),
-            // SOLUCIÓN: Proporcionamos un valor por defecto si Rol es nulo
             new Claim(ClaimTypes.Role, empleado.Rol ?? "Empleado"),
-            // SOLUCIÓN: Convertimos de forma segura int? a string
             new Claim("centroId", empleado.CentroMedicoId?.ToString() ?? string.Empty)
         };
 

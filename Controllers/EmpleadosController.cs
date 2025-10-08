@@ -1,6 +1,4 @@
-﻿using MedicalCenter.API.Data;
-using MedicalCenter.API.Models.DTOs;
-using MedicalCenter.API.Models.Entities;
+﻿using MedicalCenter.API.Models.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
