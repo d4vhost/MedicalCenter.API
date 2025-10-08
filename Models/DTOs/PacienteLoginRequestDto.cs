@@ -2,12 +2,12 @@
 
 namespace MedicalCenter.API.Models.DTOs
 {
-    public class LoginRequestDto
+    public class PacienteLoginRequestDto
     {
         [Required]
         public string Cedula { get; set; } = string.Empty;
 
         [Required]
-        public string Password { get; set; } = string.Empty;
+        public DateTime FechaNacimiento { get; set; }
     }
 }
