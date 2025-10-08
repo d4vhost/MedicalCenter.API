@@ -1,4 +1,6 @@
-﻿using MedicalCenter.API.Models.DTOs;
+﻿using MedicalCenter.API.Data;
+using MedicalCenter.API.Models.DTOs;
+using MedicalCenter.API.Models.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
@@ -20,7 +22,6 @@ public class EmpleadosController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleados()
     {
-        // Usamos Include() para traer también la información del CentroMedico relacionado.
         return await _context.Empleados
             .Include(e => e.CentroMedico)
             .Select(e => new EmpleadoDto
@@ -31,7 +32,8 @@ public class EmpleadosController : ControllerBase
                 Apellido = e.Apellido,
                 Rol = e.Rol,
                 CentroMedicoId = e.CentroMedicoId,
-                NombreCentroMedico = e.CentroMedico.Nombre // Mapeamos el nombre
+                // SOLUCIÓN: Comprobamos si CentroMedico es nulo antes de acceder a su nombre
+                NombreCentroMedico = e.CentroMedico != null ? e.CentroMedico.Nombre : "Sin Asignar"
             })
             .ToListAsync();
     }
@@ -57,7 +59,8 @@ public class EmpleadosController : ControllerBase
             Apellido = empleado.Apellido,
             Rol = empleado.Rol,
             CentroMedicoId = empleado.CentroMedicoId,
-            NombreCentroMedico = empleado.CentroMedico.Nombre
+            // SOLUCIÓN: Comprobamos si CentroMedico es nulo
+            NombreCentroMedico = empleado.CentroMedico != null ? empleado.CentroMedico.Nombre : "Sin Asignar"
         };
 
         return empleadoDto;
@@ -72,14 +75,15 @@ public class EmpleadosController : ControllerBase
             Cedula = empleadoDto.Cedula,
             Nombre = empleadoDto.Nombre,
             Apellido = empleadoDto.Apellido,
+            Password = empleadoDto.Password, // No olvides hashear esto en producción
             Rol = empleadoDto.Rol,
-            CentroMedicoId = empleadoDto.CentroMedicoId // Asignamos la clave foránea
+            CentroMedicoId = empleadoDto.CentroMedicoId
         };
 
         _context.Empleados.Add(nuevoEmpleado);
         await _context.SaveChangesAsync();
 
-        // Para devolver el DTO completo, necesitamos cargar el CentroMedico recién asignado
+        // Para devolver el DTO completo, cargamos la relación
         await _context.Entry(nuevoEmpleado).Reference(e => e.CentroMedico).LoadAsync();
 
         var resultadoDto = new EmpleadoDto
@@ -90,7 +94,8 @@ public class EmpleadosController : ControllerBase
             Apellido = nuevoEmpleado.Apellido,
             Rol = nuevoEmpleado.Rol,
             CentroMedicoId = nuevoEmpleado.CentroMedicoId,
-            NombreCentroMedico = nuevoEmpleado.CentroMedico.Nombre
+            // SOLUCIÓN: Comprobamos si CentroMedico es nulo
+            NombreCentroMedico = nuevoEmpleado.CentroMedico != null ? nuevoEmpleado.CentroMedico.Nombre : "Sin Asignar"
         };
 
         return CreatedAtAction(nameof(GetEmpleado), new { id = resultadoDto.Id }, resultadoDto);
@@ -112,6 +117,12 @@ public class EmpleadosController : ControllerBase
         empleado.Apellido = empleadoDto.Apellido;
         empleado.Rol = empleadoDto.Rol;
         empleado.CentroMedicoId = empleadoDto.CentroMedicoId;
+
+        // Opcional: Actualizar contraseña si se proporciona
+        if (!string.IsNullOrEmpty(empleadoDto.Password))
+        {
+            empleado.Password = empleadoDto.Password; // Hashear en producción
+        }
 
         await _context.SaveChangesAsync();
         return NoContent();

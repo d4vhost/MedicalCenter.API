@@ -8,20 +8,24 @@ public class Empleado
 
     [Required]
     [StringLength(10)]
-    public string Cedula { get; set; } = string.Empty; 
+    public string Cedula { get; set; } = string.Empty;
 
     [Required]
     [StringLength(100)]
-    public string Nombre { get; set; } = string.Empty; 
+    public string Nombre { get; set; } = string.Empty;
 
     [Required]
     [StringLength(100)]
-    public string Apellido { get; set; } = string.Empty; 
+    public string Apellido { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(255)]
+    public string Password { get; set; } = string.Empty;
 
     [StringLength(50)]
-    public string? Rol { get; set; } 
+    public string? Rol { get; set; }
 
-    public int CentroMedicoId { get; set; }
+    public int? CentroMedicoId { get; set; }
     [ForeignKey("CentroMedicoId")]
-    public virtual CentroMedico CentroMedico { get; set; } = null!; 
+    public virtual CentroMedico? CentroMedico { get; set; }
 }
