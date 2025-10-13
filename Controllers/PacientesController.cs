@@ -125,4 +125,36 @@ public class PacientesController : ControllerBase
 
         return NoContent();
     }
+
+    // GET: api/Pacientes/5/historial
+    [HttpGet("{id}/historial")]
+    public async Task<ActionResult> GetHistorial(int id)
+    {
+        var consultas = await _context.ConsultasMedicas
+            .Where(c => c.PacienteId == id)
+            .Select(c => new { c.Id, c.FechaHora, c.Motivo })
+            .ToListAsync();
+
+        var consultaIds = consultas.Select(c => c.Id).ToList();
+
+        var diagnosticos = await _context.Diagnosticos
+            .Where(d => consultaIds.Contains(d.ConsultaId))
+            .ToListAsync();
+
+        var diagnosticoIds = diagnosticos.Select(d => d.Id).ToList();
+
+        var prescripciones = await _context.Prescripciones
+            .Where(p => diagnosticoIds.Contains(p.DiagnosticoId))
+            .Include(p => p.Medicamento)
+            .Select(p => new
+            {
+                p.Id,
+                p.DiagnosticoId,
+                p.Indicaciones,
+                NombreMedicamento = p.Medicamento != null ? p.Medicamento.NombreGenerico : "Medicamento no encontrado"
+            })
+            .ToListAsync();
+
+        return Ok(new { consultas, diagnosticos, prescripciones });
+    }
 }
