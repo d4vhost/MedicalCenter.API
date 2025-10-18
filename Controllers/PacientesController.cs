@@ -63,6 +63,12 @@ public class PacientesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<PacienteDto>> PostPaciente(PacienteCreateDto pacienteDto)
     {
+        // **NUEVO: Validar Cédula Duplicada**
+        if (await _context.Pacientes.AnyAsync(p => p.Cedula == pacienteDto.Cedula))
+        {
+            return BadRequest("La cédula ingresada ya pertenece a otro paciente.");
+        }
+
         var nuevoPaciente = new Paciente
         {
             Cedula = pacienteDto.Cedula,
@@ -99,6 +105,13 @@ public class PacientesController : ControllerBase
             return NotFound();
         }
 
+        // **NUEVO: Validar Cédula Duplicada al Editar (si se cambia la cédula)**
+        if (paciente.Cedula != pacienteDto.Cedula && await _context.Pacientes.AnyAsync(p => p.Cedula == pacienteDto.Cedula && p.Id != id))
+        {
+            return BadRequest("La nueva cédula ingresada ya pertenece a otro paciente.");
+        }
+
+
         paciente.Cedula = pacienteDto.Cedula;
         paciente.Nombre = pacienteDto.Nombre;
         paciente.Apellido = pacienteDto.Apellido;
@@ -120,8 +133,48 @@ public class PacientesController : ControllerBase
             return NotFound();
         }
 
+        // --- INICIO: Eliminación en Cascada por Código ---
+        // 1. Encontrar todas las consultas del paciente
+        var consultas = await _context.ConsultasMedicas
+            .Where(c => c.PacienteId == id)
+            .Include(c => c.Diagnosticos) // Incluir Diagnosticos (Ahora funciona)
+                .ThenInclude(d => d.Prescripciones) // Incluir Prescripciones (Ahora funciona)
+            .ToListAsync();
+
+        if (consultas.Any())
+        {
+            // Opcional: Podrías retornar BadRequest aquí si prefieres no eliminar en cascada
+            // return BadRequest("No se puede eliminar el paciente porque tiene consultas médicas asociadas.");
+
+            // 2. Eliminar Prescripciones, luego Diagnósticos, luego Consultas
+            foreach (var consulta in consultas)
+            {
+                foreach (var diagnostico in consulta.Diagnosticos) // Ahora consulta.Diagnosticos existe
+                {
+                    _context.Prescripciones.RemoveRange(diagnostico.Prescripciones); // Ahora diagnostico.Prescripciones existe
+                }
+                _context.Diagnosticos.RemoveRange(consulta.Diagnosticos);
+            }
+            _context.ConsultasMedicas.RemoveRange(consultas);
+        }
+        // --- FIN: Eliminación en Cascada por Código ---
+
+
+        // 3. Eliminar al Paciente
         _context.Pacientes.Remove(paciente);
-        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            // Loggear el error interno para depuración
+            Console.WriteLine($"Error al eliminar paciente: {ex.InnerException?.Message ?? ex.Message}");
+            // Devolver un error más genérico o específico según necesites
+            return StatusCode(500, "Ocurrió un error al intentar eliminar el paciente y su historial relacionado.");
+        }
+
 
         return NoContent();
     }
@@ -130,8 +183,15 @@ public class PacientesController : ControllerBase
     [HttpGet("{id}/historial")]
     public async Task<ActionResult> GetHistorial(int id)
     {
+        // Verifica si el paciente existe primero
+        if (!await _context.Pacientes.AnyAsync(p => p.Id == id))
+        {
+            return NotFound("Paciente no encontrado.");
+        }
+
         var consultas = await _context.ConsultasMedicas
             .Where(c => c.PacienteId == id)
+            .OrderByDescending(c => c.FechaHora) // Ordenar por fecha descendente
             .Select(c => new { c.Id, c.FechaHora, c.Motivo })
             .ToListAsync();
 
@@ -139,6 +199,7 @@ public class PacientesController : ControllerBase
 
         var diagnosticos = await _context.Diagnosticos
             .Where(d => consultaIds.Contains(d.ConsultaId))
+            .Select(d => new { d.Id, d.ConsultaId, d.EnfermedadNombre, d.Observaciones }) // Seleccionar campos necesarios
             .ToListAsync();
 
         var diagnosticoIds = diagnosticos.Select(d => d.Id).ToList();
