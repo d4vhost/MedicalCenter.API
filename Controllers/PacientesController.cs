@@ -218,4 +218,18 @@ public class PacientesController : ControllerBase
 
         return Ok(new { consultas, diagnosticos, prescripciones });
     }
+
+    [HttpGet("existe/{cedula}")]
+    public async Task<IActionResult> ExisteCedula(string cedula)
+    {
+        var existe = await _context.Pacientes.AnyAsync(p => p.Cedula == cedula);
+        if (existe)
+        {
+            return Ok(); 
+        }
+        else
+        {
+            return NotFound(); 
+        }
+    }
 }
