@@ -1,4 +1,4 @@
-﻿using MedicalCenter.API.Models.DTOs;
+﻿using MedicalCenter.API.Models.DTOs;    
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
@@ -111,7 +111,6 @@ public class PacientesController : ControllerBase
             return BadRequest("La nueva cédula ingresada ya pertenece a otro paciente.");
         }
 
-
         paciente.Cedula = pacienteDto.Cedula;
         paciente.Nombre = pacienteDto.Nombre;
         paciente.Apellido = pacienteDto.Apellido;
@@ -134,24 +133,19 @@ public class PacientesController : ControllerBase
         }
 
         // --- INICIO: Eliminación en Cascada por Código ---
-        // 1. Encontrar todas las consultas del paciente
         var consultas = await _context.ConsultasMedicas
             .Where(c => c.PacienteId == id)
-            .Include(c => c.Diagnosticos) // Incluir Diagnosticos (Ahora funciona)
-                .ThenInclude(d => d.Prescripciones) // Incluir Prescripciones (Ahora funciona)
+            .Include(c => c.Diagnosticos)
+                .ThenInclude(d => d.Prescripciones)
             .ToListAsync();
 
         if (consultas.Any())
         {
-            // Opcional: Podrías retornar BadRequest aquí si prefieres no eliminar en cascada
-            // return BadRequest("No se puede eliminar el paciente porque tiene consultas médicas asociadas.");
-
-            // 2. Eliminar Prescripciones, luego Diagnósticos, luego Consultas
             foreach (var consulta in consultas)
             {
-                foreach (var diagnostico in consulta.Diagnosticos) // Ahora consulta.Diagnosticos existe
+                foreach (var diagnostico in consulta.Diagnosticos)
                 {
-                    _context.Prescripciones.RemoveRange(diagnostico.Prescripciones); // Ahora diagnostico.Prescripciones existe
+                    _context.Prescripciones.RemoveRange(diagnostico.Prescripciones);
                 }
                 _context.Diagnosticos.RemoveRange(consulta.Diagnosticos);
             }
@@ -159,8 +153,6 @@ public class PacientesController : ControllerBase
         }
         // --- FIN: Eliminación en Cascada por Código ---
 
-
-        // 3. Eliminar al Paciente
         _context.Pacientes.Remove(paciente);
 
         try
@@ -169,12 +161,9 @@ public class PacientesController : ControllerBase
         }
         catch (DbUpdateException ex)
         {
-            // Loggear el error interno para depuración
             Console.WriteLine($"Error al eliminar paciente: {ex.InnerException?.Message ?? ex.Message}");
-            // Devolver un error más genérico o específico según necesites
             return StatusCode(500, "Ocurrió un error al intentar eliminar el paciente y su historial relacionado.");
         }
-
 
         return NoContent();
     }
@@ -183,7 +172,6 @@ public class PacientesController : ControllerBase
     [HttpGet("{id}/historial")]
     public async Task<ActionResult> GetHistorial(int id)
     {
-        // Verifica si el paciente existe primero
         if (!await _context.Pacientes.AnyAsync(p => p.Id == id))
         {
             return NotFound("Paciente no encontrado.");
@@ -191,7 +179,7 @@ public class PacientesController : ControllerBase
 
         var consultas = await _context.ConsultasMedicas
             .Where(c => c.PacienteId == id)
-            .OrderByDescending(c => c.FechaHora) // Ordenar por fecha descendente
+            .OrderByDescending(c => c.FechaHora)
             .Select(c => new { c.Id, c.FechaHora, c.Motivo })
             .ToListAsync();
 
@@ -199,7 +187,7 @@ public class PacientesController : ControllerBase
 
         var diagnosticos = await _context.Diagnosticos
             .Where(d => consultaIds.Contains(d.ConsultaId))
-            .Select(d => new { d.Id, d.ConsultaId, d.EnfermedadNombre, d.Observaciones }) // Seleccionar campos necesarios
+            .Select(d => new { d.Id, d.ConsultaId, d.EnfermedadNombre, d.Observaciones })
             .ToListAsync();
 
         var diagnosticoIds = diagnosticos.Select(d => d.Id).ToList();
@@ -219,17 +207,37 @@ public class PacientesController : ControllerBase
         return Ok(new { consultas, diagnosticos, prescripciones });
     }
 
-    [HttpGet("existe/{cedula}")]
+    // GET: api/Pacientes/verificar/{cedula}  <--- ¡RUTA CAMBIADA AQUÍ!
+    [HttpGet("verificar/{cedula}")] // Cambio: Renombrada la ruta para evitar conflicto
     public async Task<IActionResult> ExisteCedula(string cedula)
     {
+        // Este método solo verifica si existe o no, útil para validaciones rápidas
         var existe = await _context.Pacientes.AnyAsync(p => p.Cedula == cedula);
         if (existe)
         {
-            return Ok(); 
+            return Ok(); // Devuelve 200 OK si existe
         }
         else
         {
-            return NotFound(); 
+            return NotFound(); // Devuelve 404 Not Found si no existe
         }
+    }
+
+    // GET: api/Pacientes/existe/{cedula} <--- Esta ruta se mantiene
+    [HttpGet("existe/{cedula}")]
+    public async Task<ActionResult<object>> VerificarCedulaExistente(string cedula)
+    {
+        // Este método devuelve el ID si existe, útil para saber a quién pertenece
+        var paciente = await _context.Pacientes
+                                     .AsNoTracking()
+                                     .FirstOrDefaultAsync(p => p.Cedula == cedula);
+
+        if (paciente == null)
+        {
+            return NotFound(); // Devuelve 404 si NO existe
+        }
+
+        // Devuelve 200 OK con el ID del paciente si existe
+        return Ok(new { id = paciente.Id });
     }
 }
