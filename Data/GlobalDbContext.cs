@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Archivo: Data/GlobalDbContext.cs
+using Microsoft.EntityFrameworkCore;
 
 namespace MedicalCenter.API.Data
 {
@@ -8,7 +9,6 @@ namespace MedicalCenter.API.Data
         {
         }
 
-        // Tablas Globales
         public DbSet<CentroMedico> CentrosMedicos { get; set; }
         public DbSet<Empleado> Empleados { get; set; }
         public DbSet<Especialidad> Especialidades { get; set; }
@@ -16,16 +16,71 @@ namespace MedicalCenter.API.Data
         public DbSet<Paciente> Pacientes { get; set; }
         public DbSet<Medicamento> Medicamentos { get; set; }
 
+        // --- ¡AQUÍ ESTÁ LA CORRECCIÓN AMPLIADA! ---
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            modelBuilder.Entity<CentroMedico>().ToTable("centros_medicos");
-            modelBuilder.Entity<Empleado>().ToTable("empleados");
-            modelBuilder.Entity<Especialidad>().ToTable("especialidades");
-            modelBuilder.Entity<Medico>().ToTable("medicos");
-            modelBuilder.Entity<Paciente>().ToTable("pacientes");
-            modelBuilder.Entity<Medicamento>().ToTable("medicamentos");
+            // Mapeo de la tabla centros_medicos
+            modelBuilder.Entity<CentroMedico>(entity =>
+            {
+                entity.ToTable("centros_medicos");
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.Nombre).HasColumnName("nombre");
+                entity.Property(e => e.Direccion).HasColumnName("direccion");
+            });
+
+            // Mapeo de la tabla empleados (¡Esta es la que da el error!)
+            modelBuilder.Entity<Empleado>(entity =>
+            {
+                entity.ToTable("empleados");
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.Cedula).HasColumnName("cedula");
+                entity.Property(e => e.Nombre).HasColumnName("nombre");
+                entity.Property(e => e.Apellido).HasColumnName("apellido");
+                entity.Property(e => e.Rol).HasColumnName("rol");
+                entity.Property(e => e.Password).HasColumnName("password");
+                entity.Property(e => e.CentroMedicoId).HasColumnName("centro_medico_id"); // <-- El mapeo clave
+            });
+
+            // Mapeo de la tabla especialidades
+            modelBuilder.Entity<Especialidad>(entity =>
+            {
+                entity.ToTable("especialidades");
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.Nombre).HasColumnName("nombre");
+            });
+
+            // Mapeo de la tabla medicamentos
+            modelBuilder.Entity<Medicamento>(entity =>
+            {
+                entity.ToTable("medicamentos");
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.NombreGenerico).HasColumnName("nombre_generico");
+                entity.Property(e => e.NombreComercial).HasColumnName("nombre_comercial");
+                entity.Property(e => e.Laboratorio).HasColumnName("laboratorio");
+            });
+
+            // Mapeo de la tabla medicos
+            modelBuilder.Entity<Medico>(entity =>
+            {
+                entity.ToTable("medicos");
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.EmpleadoId).HasColumnName("empleado_id");
+                entity.Property(e => e.EspecialidadId).HasColumnName("especialidad_id");
+            });
+
+            // Mapeo de la tabla pacientes
+            modelBuilder.Entity<Paciente>(entity =>
+            {
+                entity.ToTable("pacientes");
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.Cedula).HasColumnName("cedula");
+                entity.Property(e => e.Nombre).HasColumnName("nombre");
+                entity.Property(e => e.Apellido).HasColumnName("apellido");
+                entity.Property(e => e.FechaNacimiento).HasColumnName("fecha_nacimiento");
+                entity.Property(e => e.Direccion).HasColumnName("direccion");
+            });
         }
     }
 }
