@@ -82,7 +82,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // DELETE: api/Pacientes/5
-        [Authorize(Roles = "Admin")] // Solo Admin puede borrar pacientes
+        [Authorize(Roles = "ADMINISTRATIVO")] // Solo Admin puede borrar pacientes
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeletePaciente(int id)
         {

@@ -42,7 +42,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // PUT: api/CentrosMedicos/5 (Solo Admin)
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpPut("{id}")]
         public async Task<IActionResult> PutCentroMedico(int id, CentroMedico centroMedico)
         {
@@ -73,7 +73,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // POST: api/CentrosMedicos (Solo Admin)
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpPost]
         public async Task<ActionResult<CentroMedico>> PostCentroMedico(CentroMedico centroMedico)
         {
@@ -84,7 +84,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // DELETE: api/CentrosMedicos/5 (Solo Admin)
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteCentroMedico(int id)
         {

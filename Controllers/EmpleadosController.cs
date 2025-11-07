@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MedicalCenter.API.Controllers
 {
-    [Authorize(Roles = "Admin")] // <-- SOLO ADMIN PUEDE GESTIONAR EMPLEADOS
+    [Authorize(Roles = "ADMINISTRATIVO")] // <-- SOLO ADMIN PUEDE GESTIONAR EMPLEADOS
     [Route("api/[controller]")]
     [ApiController]
     public class EmpleadosController : ControllerBase

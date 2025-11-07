@@ -125,7 +125,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // DELETE: api/ConsultasMedicas/5
-        [Authorize(Roles = "Admin")] // Solo admin puede borrar consultas
+        [Authorize(Roles = "ADMINISTRATIVO")] // Solo admin puede borrar consultas
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteConsultaMedica(int id)
         {
