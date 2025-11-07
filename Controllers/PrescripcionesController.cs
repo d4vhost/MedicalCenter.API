@@ -1,8 +1,10 @@
-﻿using MedicalCenter.API.Data;
+﻿// Archivo: Controllers/PrescripcionesController.cs
+
+using MedicalCenter.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
+using System.Security.Claims; // <-- ¡¡IMPORTANTE!!
 
 namespace MedicalCenter.API.Controllers
 {
@@ -11,8 +13,10 @@ namespace MedicalCenter.API.Controllers
     [ApiController]
     public class PrescripcionesController : ControllerBase
     {
+        // CAMBIO: Inyectar la FÁBRICA
         private readonly ILocalDbContextFactory _localContextFactory;
-        private readonly GlobalDbContext _globalContext; // Para validar medicamentos
+        // CAMBIO: Inyectar el contexto GLOBAL (para validar Medicamentos)
+        private readonly GlobalDbContext _globalContext;
 
         public PrescripcionesController(ILocalDbContextFactory localContextFactory, GlobalDbContext globalContext)
         {
@@ -32,12 +36,21 @@ namespace MedicalCenter.API.Controllers
         }
         // --- Fin del Helper ---
 
+
         // GET: api/Prescripciones/PorDiagnostico/5
+        // Endpoint útil para tu frontend
         [HttpGet("PorDiagnostico/{diagnosticoId}")]
         public async Task<ActionResult<IEnumerable<Prescripcion>>> GetPrescripcionesPorDiagnostico(int diagnosticoId)
         {
             using (var _context = GetContextFromToken())
             {
+                // Validar que el diagnóstico pertenezca a este centro
+                var diagnosticoExiste = await _context.Diagnosticos.AnyAsync(d => d.Id == diagnosticoId);
+                if (!diagnosticoExiste)
+                {
+                    return NotFound("El diagnóstico no existe en este centro médico.");
+                }
+
                 return await _context.Prescripciones
                     .Where(p => p.DiagnosticoId == diagnosticoId)
                     .ToListAsync();
@@ -119,23 +132,14 @@ namespace MedicalCenter.API.Controllers
 
             using (var _context = GetContextFromToken())
             {
-                _context.Entry(prescripcion).State = EntityState.Modified;
+                var existe = await _context.Prescripciones.AnyAsync(e => e.Id == id);
+                if (!existe)
+                {
+                    return NotFound();
+                }
 
-                try
-                {
-                    await _context.SaveChangesAsync();
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    if (!_context.Prescripciones.Any(e => e.Id == id))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
+                _context.Entry(prescripcion).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
             }
             return NoContent();
         }

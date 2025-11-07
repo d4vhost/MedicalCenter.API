@@ -1,122 +1,106 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+﻿// Archivo: Controllers/AuthController.cs
+
+using MedicalCenter.API.Data;
 using MedicalCenter.API.Models.DTOs;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using System.Threading.Tasks;
 
-[Route("api/[controller]")]
-[ApiController]
-public class AuthController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-    private readonly IConfiguration _configuration;
-
-    public AuthController(MedicalCenterDbContext context, IConfiguration configuration)
+    [Route("api/[controller]")]
+    [ApiController]
+    public class AuthController : ControllerBase
     {
-        _context = context;
-        _configuration = configuration;
-    }
+        private readonly GlobalDbContext _globalContext;
 
-    [HttpPost("login")]
-    public async Task<ActionResult<LoginResponseDto>> Login(LoginRequestDto loginRequest)
-    {
-        // La búsqueda ahora es solo por cédula
-        var empleado = await _context.Empleados
-            .FirstOrDefaultAsync(e => e.Cedula == loginRequest.Cedula);
+        // --- CORRECCIÓN 1: Declarar el campo ---
+        // Este campo no existía, por eso tenías el error CS0103
+        private readonly IConfiguration _configuration;
 
-        // La validación ya no comprueba el centro médico
-        if (empleado == null || empleado.Password != loginRequest.Password)
+        public AuthController(GlobalDbContext globalContext, IConfiguration configuration)
         {
-            return Unauthorized("Usuario o contraseña incorrectos.");
+            _globalContext = globalContext;
+
+            // --- CORRECCIÓN 2: Asignar el valor ---
+            // Faltaba esta línea para guardar la configuración
+            _configuration = configuration;
         }
 
-        var token = GenerateJwtToken(empleado);
-
-        var response = new LoginResponseDto
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequestDto loginRequest)
         {
-            Token = token,
-            EmpleadoId = empleado.Id,
-            NombreCompleto = $"{empleado.Nombre} {empleado.Apellido}",
-            Rol = empleado.Rol // El rol se envía en la respuesta, ¡esto es clave!
-        };
+            var empleado = await _globalContext.Empleados
+                .FirstOrDefaultAsync(e => e.Cedula == loginRequest.Cedula);
 
-        return Ok(response);
-    }
+            if (empleado == null || empleado.Password != loginRequest.Password)
+            {
+                return Unauthorized(new { message = "Cédula o contraseña incorrecta." });
+            }
 
-    [HttpPost("login-paciente")]
-    public async Task<ActionResult<LoginResponseDto>> LoginPaciente(PacienteLoginRequestDto loginRequest)
-    {
-        var paciente = await _context.Pacientes
-            .FirstOrDefaultAsync(p => p.Cedula == loginRequest.Cedula && p.FechaNacimiento.HasValue && p.FechaNacimiento.Value.Date == loginRequest.FechaNacimiento.Date);
+            // --- CORRECCIÓN 3: Validar nulos (para error CS0029) ---
+            // Verificamos que el empleado tenga un rol y un centro asignados.
+            // Si son nulos, la cuenta no es válida para iniciar sesión.
+            if (string.IsNullOrEmpty(empleado.Rol) || empleado.CentroMedicoId == null)
+            {
+                return Unauthorized(new { message = "La cuenta del empleado no está configurada correctamente (falta Rol o Centro Médico)." });
+            }
 
-        if (paciente == null)
-        {
-            return Unauthorized("Cédula o fecha de nacimiento incorrectas.");
+            // Si llegamos aquí, sabemos que .Rol y .CentroMedicoId NO son nulos.
+            var token = GenerateJwtToken(empleado);
+
+            return Ok(new LoginResponseDto
+            {
+                Token = token,
+                Id = empleado.Id,
+                Nombre = empleado.Nombre,
+                Apellido = empleado.Apellido,
+                // Ahora la asignación es válida porque ya comprobamos que no son nulos
+                Rol = empleado.Rol,
+                CentroMedicoId = empleado.CentroMedicoId.Value // Usamos .Value para obtener el 'int' del 'int?'
+            });
         }
 
-        // Simulando un token para el paciente
-        var token = GenerateJwtTokenForPaciente(paciente);
-
-        var response = new LoginResponseDto
+        private string GenerateJwtToken(Empleado empleado)
         {
-            Token = token,
-            EmpleadoId = paciente.Id, // Usamos el Id del paciente
-            NombreCompleto = $"{paciente.Nombre} {paciente.Apellido}",
-            Rol = "Paciente"
-        };
+            // Esta línea ahora funciona porque _configuration ya existe
+            var jwtKey = _configuration["JWT:Key"];
+            if (string.IsNullOrEmpty(jwtKey))
+            {
+                throw new InvalidOperationException("JWT Key no está configurada en appsettings.json");
+            }
 
-        return Ok(response);
-    }
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-    private string GenerateJwtTokenForPaciente(Paciente paciente)
-    {
-        var jwtKey = _configuration["Jwt:Key"] ?? throw new ArgumentNullException("Jwt:Key", "La clave JWT no se encontró en la configuración.");
-        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+            // --- CORRECCIÓN 4: Usar los valores validados ---
+            // Le decimos al compilador que confiamos que Rol y CentroMedicoId no son nulos
+            // (porque lo validamos en el método Login)
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
+                new Claim(ClaimTypes.GivenName, empleado.Nombre),
+                new Claim(ClaimTypes.Surname, empleado.Apellido),
+                new Claim(ClaimTypes.Role, empleado.Rol!), // El '!' le dice al compilador: "Confía en mí, no es nulo"
+                new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString()) // Usamos .Value
+            };
 
-        var claims = new[]
-        {
-        new Claim(JwtRegisteredClaimNames.Sub, paciente.Id.ToString()),
-        new Claim(JwtRegisteredClaimNames.GivenName, paciente.Nombre),
-        new Claim(ClaimTypes.Role, "Paciente"),
-    };
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddHours(8),
+                // Estas líneas ahora funcionan porque _configuration ya existe
+                Issuer = _configuration["JWT:Issuer"],
+                Audience = _configuration["JWT:Audience"],
+                SigningCredentials = credentials
+            };
 
-        var token = new JwtSecurityToken(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.Now.AddHours(8),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
-
-    private string GenerateJwtToken(Empleado empleado)
-    {
-        var jwtKey = _configuration["Jwt:Key"] ?? throw new ArgumentNullException("Jwt:Key", "La clave JWT no se encontró en la configuración.");
-        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, empleado.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.GivenName, empleado.Nombre),
-            new Claim(ClaimTypes.Role, empleado.Rol ?? "Empleado"),
-            new Claim("centroId", empleado.CentroMedicoId?.ToString() ?? string.Empty)
-        };
-
-        var token = new JwtSecurityToken(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.Now.AddHours(8),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
     }
 }

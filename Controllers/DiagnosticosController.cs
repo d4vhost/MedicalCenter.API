@@ -1,8 +1,10 @@
-﻿using MedicalCenter.API.Data;
+﻿// Archivo: Controllers/DiagnosticosController.cs
+
+using MedicalCenter.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
+using System.Security.Claims; // <-- ¡¡IMPORTANTE!!
 
 namespace MedicalCenter.API.Controllers
 {
@@ -11,6 +13,7 @@ namespace MedicalCenter.API.Controllers
     [ApiController]
     public class DiagnosticosController : ControllerBase
     {
+        // CAMBIO: Inyectar la FÁBRICA
         private readonly ILocalDbContextFactory _localContextFactory;
 
         public DiagnosticosController(ILocalDbContextFactory localContextFactory)
@@ -41,17 +44,24 @@ namespace MedicalCenter.API.Controllers
         }
 
         // GET: api/Diagnosticos/PorConsulta/5
+        // Endpoint útil para tu frontend
         [HttpGet("PorConsulta/{consultaId}")]
         public async Task<ActionResult<IEnumerable<Diagnostico>>> GetDiagnosticosPorConsulta(int consultaId)
         {
             using (var _context = GetContextFromToken())
             {
+                // Validar que la consulta pertenezca a este centro
+                var consultaExiste = await _context.ConsultasMedicas.AnyAsync(c => c.Id == consultaId);
+                if (!consultaExiste)
+                {
+                    return NotFound("La consulta no existe en este centro médico.");
+                }
+
                 return await _context.Diagnosticos
                     .Where(d => d.ConsultaId == consultaId)
                     .ToListAsync();
             }
         }
-
 
         // GET: api/Diagnosticos/5
         [HttpGet("{id}")]
@@ -81,23 +91,14 @@ namespace MedicalCenter.API.Controllers
 
             using (var _context = GetContextFromToken())
             {
-                _context.Entry(diagnostico).State = EntityState.Modified;
+                var existe = await _context.Diagnosticos.AnyAsync(e => e.Id == id);
+                if (!existe)
+                {
+                    return NotFound();
+                }
 
-                try
-                {
-                    await _context.SaveChangesAsync();
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    if (!_context.Diagnosticos.Any(e => e.Id == id))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
+                _context.Entry(diagnostico).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
             }
             return NoContent();
         }
@@ -124,7 +125,6 @@ namespace MedicalCenter.API.Controllers
         }
 
         // DELETE: api/Diagnosticos/5
-        [Authorize(Roles = "Admin")] // Solo Admin borra
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteDiagnostico(int id)
         {

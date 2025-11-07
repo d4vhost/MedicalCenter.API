@@ -1,8 +1,10 @@
-﻿using MedicalCenter.API.Data;
+﻿// Archivo: Controllers/ConsultasMedicasController.cs
+
+using MedicalCenter.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
+using System.Security.Claims; // <-- ¡¡IMPORTANTE!!
 
 namespace MedicalCenter.API.Controllers
 {
@@ -11,9 +13,9 @@ namespace MedicalCenter.API.Controllers
     [ApiController]
     public class ConsultasMedicasController : ControllerBase
     {
-        // Inyectamos la FÁBRICA de contextos locales
+        // CAMBIO: Inyectar la FÁBRICA de contextos locales
         private readonly ILocalDbContextFactory _localContextFactory;
-        // Inyectamos el contexto GLOBAL para validar
+        // CAMBIO: Inyectar el contexto GLOBAL (para validar Pacientes y Médicos)
         private readonly GlobalDbContext _globalContext;
 
         public ConsultasMedicasController(ILocalDbContextFactory localContextFactory, GlobalDbContext globalContext)
@@ -25,12 +27,14 @@ namespace MedicalCenter.API.Controllers
         // --- Helper para obtener el contexto local correcto ---
         private LocalDbContext GetContextFromToken()
         {
+            // 1. Buscar el claim "centro_medico_id" que añadimos en el AuthController
             var centroIdClaim = User.FindFirst("centro_medico_id");
             if (centroIdClaim == null || !int.TryParse(centroIdClaim.Value, out var centroId))
             {
                 throw new InvalidOperationException("Token de usuario no contiene un 'centro_medico_id' válido.");
             }
-            // La fábrica crea el DbContext para Guayaquil (ID 2) o Cuenca (ID 3)
+
+            // 2. La fábrica crea el DbContext para Guayaquil (ID 2) o Cuenca (ID 3)
             return _localContextFactory.CreateDbContext(centroId);
         }
         // --- Fin del Helper ---
@@ -42,7 +46,7 @@ namespace MedicalCenter.API.Controllers
             // 'using' asegura que la conexión se cierre al terminar
             using (var _context = GetContextFromToken())
             {
-                // Devuelve SÓLO las consultas del centro médico del usuario
+                // Devuelve SÓLO las consultas del centro médico del usuario (Guayaquil o Cuenca)
                 return await _context.ConsultasMedicas
                                      .OrderByDescending(c => c.FechaHora)
                                      .ToListAsync();
@@ -106,23 +110,15 @@ namespace MedicalCenter.API.Controllers
 
             using (var _context = GetContextFromToken())
             {
-                _context.Entry(consultaMedica).State = EntityState.Modified;
+                // Validar que la consulta exista en este contexto
+                var existe = await _context.ConsultasMedicas.AnyAsync(e => e.Id == id);
+                if (!existe)
+                {
+                    return NotFound("La consulta no existe en este centro médico.");
+                }
 
-                try
-                {
-                    await _context.SaveChangesAsync();
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    if (!_context.ConsultasMedicas.Any(e => e.Id == id))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
+                _context.Entry(consultaMedica).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
             }
 
             return NoContent();

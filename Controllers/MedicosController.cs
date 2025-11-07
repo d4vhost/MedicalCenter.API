@@ -1,4 +1,6 @@
-﻿using MedicalCenter.API.Data;
+﻿// Archivo: Controllers/MedicosController.cs
+
+using MedicalCenter.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +12,8 @@ namespace MedicalCenter.API.Controllers
     [ApiController]
     public class MedicosController : ControllerBase
     {
-        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
+        // CAMBIO: Inyectar GlobalDbContext
+        private readonly GlobalDbContext _context;
 
         public MedicosController(GlobalDbContext context)
         {
@@ -21,7 +24,7 @@ namespace MedicalCenter.API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Medico>>> GetMedicos()
         {
-            // Incluimos Empleado y Especialidad para mostrar info útil
+            // Incluimos Empleado y Especialidad para mostrar info útil al frontend
             return await _context.Medicos
                 .Include(m => m.Empleado)
                 .Include(m => m.Especialidad)

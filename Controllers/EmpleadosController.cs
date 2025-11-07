@@ -1,4 +1,6 @@
-﻿using MedicalCenter.API.Data;
+﻿// Archivo: Controllers/EmpleadosController.cs
+
+using MedicalCenter.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +12,8 @@ namespace MedicalCenter.API.Controllers
     [ApiController]
     public class EmpleadosController : ControllerBase
     {
-        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
+        // CAMBIO: Inyectar GlobalDbContext
+        private readonly GlobalDbContext _context;
 
         public EmpleadosController(GlobalDbContext context)
         {
@@ -47,8 +50,8 @@ namespace MedicalCenter.API.Controllers
                 return BadRequest();
             }
 
-            // Aquí deberías re-hashear la contraseña si ha cambiado
-            // Por ahora, solo actualiza el estado
+            // NOTA: Si cambias la contraseña, deberías "hashearla" aquí
+
             _context.Entry(empleado).State = EntityState.Modified;
 
             try
@@ -74,8 +77,9 @@ namespace MedicalCenter.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Empleado>> PostEmpleado(Empleado empleado)
         {
-            // Aquí deberías hashear la contraseña antes de guardarla
+            // NOTA: Aquí deberías "hashear" la contraseña antes de guardarla
             // empleado.Password = Hash(empleado.Password);
+
             _context.Empleados.Add(empleado);
             await _context.SaveChangesAsync();
 
