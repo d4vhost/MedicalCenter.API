@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims; // <-- ¡¡IMPORTANTE!!
+using System.Collections.Generic; // <-- Para new List<>()
 
 namespace MedicalCenter.API.Controllers
 {
@@ -24,27 +25,51 @@ namespace MedicalCenter.API.Controllers
             _globalContext = globalContext;
         }
 
-        // --- Helper para obtener el contexto local correcto ---
-        private LocalDbContext GetContextFromToken()
+        // --- INICIO DE HELPERS CORREGIDOS ---
+
+        // Helper para OBTENER el ID del centro desde el token
+        private int? GetCentroIdFromToken()
         {
-            // 1. Buscar el claim "centro_medico_id" que añadimos en el AuthController
             var centroIdClaim = User.FindFirst("centro_medico_id");
             if (centroIdClaim == null || !int.TryParse(centroIdClaim.Value, out var centroId))
             {
-                throw new InvalidOperationException("Token de usuario no contiene un 'centro_medico_id' válido.");
+                // No se pudo encontrar el claim, o no es un número
+                return null;
             }
+            return centroId;
+        }
 
-            // 2. La fábrica crea el DbContext para Guayaquil (ID 2) o Cuenca (ID 3)
+        // Helper para CREAR el contexto basado en un ID
+        private LocalDbContext GetContextFromToken(int centroId)
+        {
+            // La fábrica crea el DbContext para Guayaquil (ID 2) o Cuenca (ID 3)
             return _localContextFactory.CreateDbContext(centroId);
         }
-        // --- Fin del Helper ---
+        // --- FIN DE HELPERS CORREGIDOS ---
+
 
         // GET: api/ConsultasMedicas
         [HttpGet]
         public async Task<ActionResult<IEnumerable<ConsultaMedica>>> GetConsultasMedicas()
         {
+            var centroId = GetCentroIdFromToken();
+
+            if (!centroId.HasValue)
+            {
+                return Unauthorized("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+
+            // --- ¡SOLUCIÓN! ---
+            // Si el usuario es de Quito (ID 1), es el admin global.
+            // No tiene DB local, así que devolvemos una lista vacía para evitar el error 500.
+            if (centroId.Value == 1)
+            {
+                return Ok(new List<ConsultaMedica>());
+            }
+            // --- Fin de la solución ---
+
             // 'using' asegura que la conexión se cierre al terminar
-            using (var _context = GetContextFromToken())
+            using (var _context = GetContextFromToken(centroId.Value))
             {
                 // Devuelve SÓLO las consultas del centro médico del usuario (Guayaquil o Cuenca)
                 return await _context.ConsultasMedicas
@@ -57,7 +82,22 @@ namespace MedicalCenter.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<ConsultaMedica>> GetConsultaMedica(int id)
         {
-            using (var _context = GetContextFromToken())
+            var centroId = GetCentroIdFromToken();
+
+            if (!centroId.HasValue)
+            {
+                return Unauthorized("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+
+            // --- ¡SOLUCIÓN! ---
+            // Si es Admin Global, no puede obtener consultas locales por ID.
+            if (centroId.Value == 1)
+            {
+                return NotFound("Consulta no encontrada en este centro médico.");
+            }
+            // --- Fin de la solución ---
+
+            using (var _context = GetContextFromToken(centroId.Value))
             {
                 var consultaMedica = await _context.ConsultasMedicas.FindAsync(id);
 
@@ -74,6 +114,21 @@ namespace MedicalCenter.API.Controllers
         [HttpPost]
         public async Task<ActionResult<ConsultaMedica>> PostConsultaMedica(ConsultaMedica consultaMedica)
         {
+            var centroId = GetCentroIdFromToken();
+
+            if (!centroId.HasValue)
+            {
+                return Unauthorized("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+
+            // --- ¡SOLUCIÓN! ---
+            // El Admin Global (ID 1) no puede CREAR consultas locales.
+            if (centroId.Value == 1)
+            {
+                return Forbid("El administrador global no puede crear consultas locales.");
+            }
+            // --- Fin de la solución ---
+
             // 1. Validar que las claves foráneas (Paciente, Medico) existan en la DB GLOBAL
             var pacienteExiste = await _globalContext.Pacientes.AnyAsync(p => p.Id == consultaMedica.PacienteId);
             var medicoExiste = await _globalContext.Medicos.AnyAsync(m => m.Id == consultaMedica.MedicoId);
@@ -84,7 +139,7 @@ namespace MedicalCenter.API.Controllers
             }
 
             // 2. Obtener el contexto local y guardar la consulta
-            using (var _context = GetContextFromToken())
+            using (var _context = GetContextFromToken(centroId.Value))
             {
                 // Asignar la fecha y hora actual si no viene
                 if (consultaMedica.FechaHora == default)
@@ -108,7 +163,22 @@ namespace MedicalCenter.API.Controllers
                 return BadRequest();
             }
 
-            using (var _context = GetContextFromToken())
+            var centroId = GetCentroIdFromToken();
+
+            if (!centroId.HasValue)
+            {
+                return Unauthorized("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+
+            // --- ¡SOLUCIÓN! ---
+            // El Admin Global (ID 1) no puede MODIFICAR consultas locales.
+            if (centroId.Value == 1)
+            {
+                return Forbid("El administrador global no puede modificar consultas locales.");
+            }
+            // --- Fin de la solución ---
+
+            using (var _context = GetContextFromToken(centroId.Value))
             {
                 // Validar que la consulta exista en este contexto
                 var existe = await _context.ConsultasMedicas.AnyAsync(e => e.Id == id);
@@ -129,7 +199,27 @@ namespace MedicalCenter.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteConsultaMedica(int id)
         {
-            using (var _context = GetContextFromToken())
+            var centroId = GetCentroIdFromToken();
+
+            if (!centroId.HasValue)
+            {
+                return Unauthorized("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+
+            // --- ¡SOLUCIÓN! ---
+            // El Admin Global (ID 1) no puede BORRAR consultas locales...
+            // Omitimos esto porque ya está protegido por [Authorize(Roles = "ADMINISTRATIVO")]
+            // y el único admin (David) tiene ID 1. Si tuvieras admins locales,
+            // necesitarías la comprobación `if (centroId.Value == 1) return Forbid();`
+
+            // ...PERO, SÍ NECESITAMOS EVITAR EL ERROR 500
+            if (centroId.Value == 1)
+            {
+                return Forbid("El administrador global no puede eliminar consultas locales.");
+            }
+            // --- Fin de la solución ---
+
+            using (var _context = GetContextFromToken(centroId.Value))
             {
                 var consultaMedica = await _context.ConsultasMedicas.FindAsync(id);
                 if (consultaMedica == null)

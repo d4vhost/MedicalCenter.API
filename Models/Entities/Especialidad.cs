@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 public class Especialidad
 {
@@ -8,7 +9,8 @@ public class Especialidad
 
     [Required]
     [StringLength(100)]
-    public string Nombre { get; set; } = string.Empty; 
+    public string Nombre { get; set; } = string.Empty;
 
+    [JsonIgnore]
     public virtual ICollection<Medico> Medicos { get; set; } = new List<Medico>(); 
 }
