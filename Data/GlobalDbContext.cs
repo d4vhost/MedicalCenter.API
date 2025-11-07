@@ -19,8 +19,13 @@ namespace MedicalCenter.API.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            // Aquí puedes agregar configuraciones de tus entidades si las tenías
-            // en el OnModelCreating del DbContext antiguo.
+
+            modelBuilder.Entity<CentroMedico>().ToTable("centros_medicos");
+            modelBuilder.Entity<Empleado>().ToTable("empleados");
+            modelBuilder.Entity<Especialidad>().ToTable("especialidades");
+            modelBuilder.Entity<Medico>().ToTable("medicos");
+            modelBuilder.Entity<Paciente>().ToTable("pacientes");
+            modelBuilder.Entity<Medicamento>().ToTable("medicamentos");
         }
     }
 }
