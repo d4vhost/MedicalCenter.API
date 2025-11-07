@@ -1,120 +1,100 @@
-﻿using MedicalCenter.API.Models.DTOs;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
-[Route("api/[controller]")]
-[ApiController]
-public class EspecialidadesController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-
-    public EspecialidadesController(MedicalCenterDbContext context)
+    [Authorize] // Todos pueden ver
+    [Route("api/[controller]")]
+    [ApiController]
+    public class EspecialidadesController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
 
-    // GET: api/Especialidades
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<EspecialidadDto>>> GetEspecialidades()
-    {
-        return await _context.Especialidades
-            .Select(e => new EspecialidadDto
-            {
-                Id = e.Id,
-                Nombre = e.Nombre
-            })
-            .ToListAsync();
-    }
-
-    // GET: api/Especialidades/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<EspecialidadDto>> GetEspecialidad(int id)
-    {
-        var especialidad = await _context.Especialidades.FindAsync(id);
-
-        if (especialidad == null)
+        public EspecialidadesController(GlobalDbContext context)
         {
-            return NotFound();
+            _context = context;
         }
 
-        var especialidadDto = new EspecialidadDto
+        // GET: api/Especialidades
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Especialidad>>> GetEspecialidades()
         {
-            Id = especialidad.Id,
-            Nombre = especialidad.Nombre
-        };
-
-        return especialidadDto;
-    }
-
-    // POST: api/Especialidades
-    [HttpPost]
-    public async Task<ActionResult<EspecialidadDto>> PostEspecialidad(EspecialidadCreateDto especialidadDto)
-    {
-        var nuevaEspecialidad = new Especialidad
-        {
-            Nombre = especialidadDto.Nombre
-        };
-
-        _context.Especialidades.Add(nuevaEspecialidad);
-        await _context.SaveChangesAsync();
-
-        var resultadoDto = new EspecialidadDto
-        {
-            Id = nuevaEspecialidad.Id,
-            Nombre = nuevaEspecialidad.Nombre
-        };
-
-        return CreatedAtAction(nameof(GetEspecialidad), new { id = resultadoDto.Id }, resultadoDto);
-    }
-
-    // PUT: api/Especialidades/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutEspecialidad(int id, EspecialidadCreateDto especialidadDto)
-    {
-        var especialidad = await _context.Especialidades.FindAsync(id);
-
-        if (especialidad == null)
-        {
-            return NotFound();
+            return await _context.Especialidades.ToListAsync();
         }
 
-        especialidad.Nombre = especialidadDto.Nombre;
+        // GET: api/Especialidades/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Especialidad>> GetEspecialidad(int id)
+        {
+            var especialidad = await _context.Especialidades.FindAsync(id);
 
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            if (!_context.Especialidades.Any(e => e.Id == id))
+            if (especialidad == null)
             {
                 return NotFound();
             }
-            else
-            {
-                throw;
-            }
+
+            return especialidad;
         }
 
-        return NoContent();
-    }
-
-    // DELETE: api/Especialidades/5
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteEspecialidad(int id)
-    {
-        var especialidad = await _context.Especialidades.FindAsync(id);
-        if (especialidad == null)
+        // PUT: api/Especialidades/5
+        [Authorize(Roles = "Admin")] // Solo Admin modifica
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutEspecialidad(int id, Especialidad especialidad)
         {
-            return NotFound();
+            if (id != especialidad.Id)
+            {
+                return BadRequest();
+            }
+
+            _context.Entry(especialidad).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_context.Especialidades.Any(e => e.Id == id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return NoContent();
         }
 
-        _context.Especialidades.Remove(especialidad);
-        await _context.SaveChangesAsync();
+        // POST: api/Especialidades
+        [Authorize(Roles = "Admin")] // Solo Admin crea
+        [HttpPost]
+        public async Task<ActionResult<Especialidad>> PostEspecialidad(Especialidad especialidad)
+        {
+            _context.Especialidades.Add(especialidad);
+            await _context.SaveChangesAsync();
 
-        return NoContent();
+            return CreatedAtAction("GetEspecialidad", new { id = especialidad.Id }, especialidad);
+        }
+
+        // DELETE: api/Especialidades/5
+        [Authorize(Roles = "Admin")] // Solo Admin borra
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteEspecialidad(int id)
+        {
+            var especialidad = await _context.Especialidades.FindAsync(id);
+            if (especialidad == null)
+            {
+                return NotFound();
+            }
+
+            _context.Especialidades.Remove(especialidad);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
     }
 }

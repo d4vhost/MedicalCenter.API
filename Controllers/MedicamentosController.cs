@@ -1,114 +1,100 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using MedicalCenter.API.Models.DTOs;
 
-[Route("api/[controller]")]
-[ApiController]
-public class MedicamentosController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-
-    public MedicamentosController(MedicalCenterDbContext context)
+    [Authorize] // Todos pueden ver
+    [Route("api/[controller]")]
+    [ApiController]
+    public class MedicamentosController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
 
-    // GET: api/Medicamentos
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<MedicamentoDto>>> GetMedicamentos()
-    {
-        return await _context.Medicamentos
-            .Select(m => new MedicamentoDto
+        public MedicamentosController(GlobalDbContext context)
+        {
+            _context = context;
+        }
+
+        // GET: api/Medicamentos
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Medicamento>>> GetMedicamentos()
+        {
+            return await _context.Medicamentos.ToListAsync();
+        }
+
+        // GET: api/Medicamentos/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Medicamento>> GetMedicamento(int id)
+        {
+            var medicamento = await _context.Medicamentos.FindAsync(id);
+
+            if (medicamento == null)
             {
-                Id = m.Id,
-                NombreGenerico = m.NombreGenerico,
-                NombreComercial = m.NombreComercial,
-                Laboratorio = m.Laboratorio
-            })
-            .ToListAsync();
-    }
+                return NotFound();
+            }
 
-    // GET: api/Medicamentos/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<MedicamentoDto>> GetMedicamento(int id)
-    {
-        var medicamento = await _context.Medicamentos.FindAsync(id);
-
-        if (medicamento == null)
-        {
-            return NotFound();
+            return medicamento;
         }
 
-        var dto = new MedicamentoDto
+        // PUT: api/Medicamentos/5
+        [Authorize(Roles = "Admin")] // Solo Admin modifica
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutMedicamento(int id, Medicamento medicamento)
         {
-            Id = medicamento.Id,
-            NombreGenerico = medicamento.NombreGenerico,
-            NombreComercial = medicamento.NombreComercial,
-            Laboratorio = medicamento.Laboratorio
-        };
+            if (id != medicamento.Id)
+            {
+                return BadRequest();
+            }
 
-        return Ok(dto);
-    }
+            _context.Entry(medicamento).State = EntityState.Modified;
 
-    // POST: api/Medicamentos
-    [HttpPost]
-    public async Task<ActionResult<MedicamentoDto>> PostMedicamento(MedicamentoCreateDto medicamentoDto)
-    {
-        var nuevoMedicamento = new Medicamento
-        {
-            NombreGenerico = medicamentoDto.NombreGenerico,
-            NombreComercial = medicamentoDto.NombreComercial,
-            Laboratorio = medicamentoDto.Laboratorio
-        };
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_context.Medicamentos.Any(e => e.Id == id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
 
-        _context.Medicamentos.Add(nuevoMedicamento);
-        await _context.SaveChangesAsync();
-
-        var resultadoDto = new MedicamentoDto
-        {
-            Id = nuevoMedicamento.Id,
-            NombreGenerico = nuevoMedicamento.NombreGenerico,
-            NombreComercial = nuevoMedicamento.NombreComercial,
-            Laboratorio = nuevoMedicamento.Laboratorio
-        };
-
-        return CreatedAtAction(nameof(GetMedicamento), new { id = resultadoDto.Id }, resultadoDto);
-    }
-
-    // PUT: api/Medicamentos/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutMedicamento(int id, MedicamentoCreateDto medicamentoDto)
-    {
-        var medicamento = await _context.Medicamentos.FindAsync(id);
-        if (medicamento == null)
-        {
-            return NotFound();
+            return NoContent();
         }
 
-        medicamento.NombreGenerico = medicamentoDto.NombreGenerico;
-        medicamento.NombreComercial = medicamentoDto.NombreComercial;
-        medicamento.Laboratorio = medicamentoDto.Laboratorio;
-
-        await _context.SaveChangesAsync();
-        return NoContent();
-    }
-
-    // DELETE: api/Medicamentos/5
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteMedicamento(int id)
-    {
-        var medicamento = await _context.Medicamentos.FindAsync(id);
-        if (medicamento == null)
+        // POST: api/Medicamentos
+        [Authorize(Roles = "Admin")] // Solo Admin crea
+        [HttpPost]
+        public async Task<ActionResult<Medicamento>> PostMedicamento(Medicamento medicamento)
         {
-            return NotFound();
+            _context.Medicamentos.Add(medicamento);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction("GetMedicamento", new { id = medicamento.Id }, medicamento);
         }
 
-        _context.Medicamentos.Remove(medicamento);
-        await _context.SaveChangesAsync();
+        // DELETE: api/Medicamentos/5
+        [Authorize(Roles = "Admin")] // Solo Admin borra
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteMedicamento(int id)
+        {
+            var medicamento = await _context.Medicamentos.FindAsync(id);
+            if (medicamento == null)
+            {
+                return NotFound();
+            }
 
-        return NoContent();
+            _context.Medicamentos.Remove(medicamento);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
     }
 }

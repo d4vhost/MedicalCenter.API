@@ -1,106 +1,100 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using MedicalCenter.API.Models.DTOs;     
 
-
-[Route("api/[controller]")]
-[ApiController]
-public class CentrosMedicosController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-    public CentrosMedicosController(MedicalCenterDbContext context)
+    [Authorize] // Requiere estar logueado
+    [Route("api/[controller]")]
+    [ApiController]
+    public class CentrosMedicosController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
 
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<CentroMedicoDto>>> GetCentrosMedicos()
-    {
-        var centrosMedicos = await _context.CentrosMedicos
-            .Select(cm => new CentroMedicoDto
+        public CentrosMedicosController(GlobalDbContext context)
+        {
+            _context = context;
+        }
+
+        // GET: api/CentrosMedicos (Todos los roles pueden ver)
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<CentroMedico>>> GetCentrosMedicos()
+        {
+            return await _context.CentrosMedicos.ToListAsync();
+        }
+
+        // GET: api/CentrosMedicos/5 (Todos los roles pueden ver)
+        [HttpGet("{id}")]
+        public async Task<ActionResult<CentroMedico>> GetCentroMedico(int id)
+        {
+            var centroMedico = await _context.CentrosMedicos.FindAsync(id);
+
+            if (centroMedico == null)
             {
-                Id = cm.Id,
-                Nombre = cm.Nombre,
-                Direccion = cm.Direccion
-            })
-            .ToListAsync();
+                return NotFound();
+            }
 
-        return Ok(centrosMedicos);
-    }
-    // Obtiene un centro médico específico por su ID.
-    [HttpGet("{id}")]
-    public async Task<ActionResult<CentroMedicoDto>> GetCentroMedico(int id)
-    {
-        var centroMedico = await _context.CentrosMedicos.FindAsync(id);
-
-        if (centroMedico == null)
-        {
-            return NotFound();
-        }
-        var centroMedicoDto = new CentroMedicoDto
-        {
-            Id = centroMedico.Id,
-            Nombre = centroMedico.Nombre,
-            Direccion = centroMedico.Direccion
-        };
-
-        return Ok(centroMedicoDto);
-    }
-
-    // Crea un nuevo centro médico.
-    [HttpPost]
-    public async Task<ActionResult<CentroMedicoDto>> PostCentroMedico(CentroMedicoCreateDto centroMedicoDto)
-    {
-        var nuevoCentroMedico = new CentroMedico
-        {
-            Nombre = centroMedicoDto.Nombre,
-            Direccion = centroMedicoDto.Direccion
-        };
-
-        _context.CentrosMedicos.Add(nuevoCentroMedico);
-        await _context.SaveChangesAsync(); 
-
-        var resultadoDto = new CentroMedicoDto
-        {
-            Id = nuevoCentroMedico.Id,
-            Nombre = nuevoCentroMedico.Nombre,
-            Direccion = nuevoCentroMedico.Direccion
-        };
-
-        return CreatedAtAction(nameof(GetCentroMedico), new { id = resultadoDto.Id }, resultadoDto);
-    }
-
-    // Actualiza un centro médico existente.
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutCentroMedico(int id, CentroMedicoCreateDto centroMedicoDto)
-    {
-        var centroMedico = await _context.CentrosMedicos.FindAsync(id);
-
-        if (centroMedico == null)
-        {
-            return NotFound();
-        }
-        centroMedico.Nombre = centroMedicoDto.Nombre;
-        centroMedico.Direccion = centroMedicoDto.Direccion;
-
-        await _context.SaveChangesAsync();
-        return NoContent();
-    }
-
-    // Elimina un centro médico.
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteCentroMedico(int id)
-    {
-        var centroMedico = await _context.CentrosMedicos.FindAsync(id);
-        if (centroMedico == null)
-        {
-            return NotFound();
+            return centroMedico;
         }
 
-        _context.CentrosMedicos.Remove(centroMedico);
-        await _context.SaveChangesAsync();
+        // PUT: api/CentrosMedicos/5 (Solo Admin)
+        [Authorize(Roles = "Admin")]
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutCentroMedico(int id, CentroMedico centroMedico)
+        {
+            if (id != centroMedico.Id)
+            {
+                return BadRequest();
+            }
 
-        return NoContent();
+            _context.Entry(centroMedico).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_context.CentrosMedicos.Any(e => e.Id == id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return NoContent();
+        }
+
+        // POST: api/CentrosMedicos (Solo Admin)
+        [Authorize(Roles = "Admin")]
+        [HttpPost]
+        public async Task<ActionResult<CentroMedico>> PostCentroMedico(CentroMedico centroMedico)
+        {
+            _context.CentrosMedicos.Add(centroMedico);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction("GetCentroMedico", new { id = centroMedico.Id }, centroMedico);
+        }
+
+        // DELETE: api/CentrosMedicos/5 (Solo Admin)
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteCentroMedico(int id)
+        {
+            var centroMedico = await _context.CentrosMedicos.FindAsync(id);
+            if (centroMedico == null)
+            {
+                return NotFound();
+            }
+
+            _context.CentrosMedicos.Remove(centroMedico);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
     }
 }

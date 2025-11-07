@@ -1,143 +1,151 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using MedicalCenter.API.Models.DTOs;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Security.Claims;
 
-[Route("api/[controller]")]
-[ApiController]
-public class ConsultasMedicasController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-
-    public ConsultasMedicasController(MedicalCenterDbContext context)
+    [Authorize] // Requiere estar logueado
+    [Route("api/[controller]")]
+    [ApiController]
+    public class ConsultasMedicasController : ControllerBase
     {
-        _context = context;
-    }
+        // Inyectamos la FÁBRICA de contextos locales
+        private readonly ILocalDbContextFactory _localContextFactory;
+        // Inyectamos el contexto GLOBAL para validar
+        private readonly GlobalDbContext _globalContext;
 
-    // GET: api/ConsultasMedicas
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<ConsultaMedicaDto>>> GetConsultasMedicas()
-    {
-        return await _context.ConsultasMedicas
-            .Include(c => c.Paciente)
-            .Include(c => c.Medico)
-                .ThenInclude(m => m.Empleado)
-            .Select(c => new ConsultaMedicaDto
+        public ConsultasMedicasController(ILocalDbContextFactory localContextFactory, GlobalDbContext globalContext)
+        {
+            _localContextFactory = localContextFactory;
+            _globalContext = globalContext;
+        }
+
+        // --- Helper para obtener el contexto local correcto ---
+        private LocalDbContext GetContextFromToken()
+        {
+            var centroIdClaim = User.FindFirst("centro_medico_id");
+            if (centroIdClaim == null || !int.TryParse(centroIdClaim.Value, out var centroId))
             {
-                Id = c.Id,
-                FechaHora = c.FechaHora,
-                PacienteId = c.PacienteId,
-                NombrePaciente = c.Paciente != null ? $"{c.Paciente.Nombre} {c.Paciente.Apellido}" : "Paciente no encontrado",
-                MedicoId = c.MedicoId,
-                // SOLUCIÓN: Cambiamos el operador ?. por una comprobación explícita
-                NombreMedico = (c.Medico != null && c.Medico.Empleado != null) ? $"{c.Medico.Empleado.Nombre} {c.Medico.Empleado.Apellido}" : "Médico no encontrado",
-                Motivo = c.Motivo
-            })
-            .ToListAsync();
-    }
+                throw new InvalidOperationException("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+            // La fábrica crea el DbContext para Guayaquil (ID 2) o Cuenca (ID 3)
+            return _localContextFactory.CreateDbContext(centroId);
+        }
+        // --- Fin del Helper ---
 
-    // GET: api/ConsultasMedicas/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<ConsultaMedicaDto>> GetConsultaMedica(int id)
-    {
-        var consulta = await _context.ConsultasMedicas
-            .Include(c => c.Paciente)
-            .Include(c => c.Medico)
-                .ThenInclude(m => m.Empleado)
-            .FirstOrDefaultAsync(c => c.Id == id);
-
-        if (consulta == null)
+        // GET: api/ConsultasMedicas
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<ConsultaMedica>>> GetConsultasMedicas()
         {
-            return NotFound();
+            // 'using' asegura que la conexión se cierre al terminar
+            using (var _context = GetContextFromToken())
+            {
+                // Devuelve SÓLO las consultas del centro médico del usuario
+                return await _context.ConsultasMedicas
+                                     .OrderByDescending(c => c.FechaHora)
+                                     .ToListAsync();
+            }
         }
 
-        var consultaDto = new ConsultaMedicaDto
+        // GET: api/ConsultasMedicas/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<ConsultaMedica>> GetConsultaMedica(int id)
         {
-            Id = consulta.Id,
-            FechaHora = consulta.FechaHora,
-            PacienteId = consulta.PacienteId,
-            NombrePaciente = consulta.Paciente != null ? $"{consulta.Paciente.Nombre} {consulta.Paciente.Apellido}" : "Paciente no encontrado",
-            MedicoId = consulta.MedicoId,
-            // SOLUCIÓN: Cambiamos el operador ?. por una comprobación explícita
-            NombreMedico = (consulta.Medico != null && consulta.Medico.Empleado != null) ? $"{consulta.Medico.Empleado.Nombre} {consulta.Medico.Empleado.Apellido}" : "Médico no encontrado",
-            Motivo = consulta.Motivo
-        };
+            using (var _context = GetContextFromToken())
+            {
+                var consultaMedica = await _context.ConsultasMedicas.FindAsync(id);
 
-        return Ok(consultaDto);
-    }
+                if (consultaMedica == null)
+                {
+                    return NotFound("Consulta no encontrada en este centro médico.");
+                }
 
-    // POST: api/ConsultasMedicas
-    [HttpPost]
-    public async Task<ActionResult<ConsultaMedica>> PostConsultaMedica(ConsultaMedicaCreateDto consultaDto)
-    {
-        if (!await _context.Pacientes.AnyAsync(p => p.Id == consultaDto.PacienteId))
-        {
-            return BadRequest("El ID del Paciente no existe.");
-        }
-        if (!await _context.Medicos.AnyAsync(m => m.Id == consultaDto.MedicoId))
-        {
-            return BadRequest("El ID del Médico no existe.");
+                return consultaMedica;
+            }
         }
 
-        var nuevaConsulta = new ConsultaMedica
+        // POST: api/ConsultasMedicas
+        [HttpPost]
+        public async Task<ActionResult<ConsultaMedica>> PostConsultaMedica(ConsultaMedica consultaMedica)
         {
-            PacienteId = consultaDto.PacienteId,
-            MedicoId = consultaDto.MedicoId,
-            Motivo = consultaDto.Motivo,
-            FechaHora = consultaDto.FechaHora.HasValue ? consultaDto.FechaHora.Value : DateTime.UtcNow
-        };
+            // 1. Validar que las claves foráneas (Paciente, Medico) existan en la DB GLOBAL
+            var pacienteExiste = await _globalContext.Pacientes.AnyAsync(p => p.Id == consultaMedica.PacienteId);
+            var medicoExiste = await _globalContext.Medicos.AnyAsync(m => m.Id == consultaMedica.MedicoId);
 
-        _context.ConsultasMedicas.Add(nuevaConsulta);
-        await _context.SaveChangesAsync();
+            if (!pacienteExiste || !medicoExiste)
+            {
+                return BadRequest(new { message = "El PacienteId o MedicoId no existen en la base de datos global." });
+            }
 
-        return CreatedAtAction(nameof(GetConsultaMedica), new { id = nuevaConsulta.Id }, nuevaConsulta);
-    }
+            // 2. Obtener el contexto local y guardar la consulta
+            using (var _context = GetContextFromToken())
+            {
+                // Asignar la fecha y hora actual si no viene
+                if (consultaMedica.FechaHora == default)
+                {
+                    consultaMedica.FechaHora = DateTime.UtcNow;
+                }
 
-    // PUT: api/ConsultasMedicas/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutConsultaMedica(int id, ConsultaMedicaCreateDto consultaDto)
-    {
-        var consulta = await _context.ConsultasMedicas.FindAsync(id);
-        if (consulta == null)
-        {
-            return NotFound();
+                _context.ConsultasMedicas.Add(consultaMedica);
+                await _context.SaveChangesAsync();
+
+                return CreatedAtAction("GetConsultaMedica", new { id = consultaMedica.Id }, consultaMedica);
+            }
         }
 
-        if (!await _context.Pacientes.AnyAsync(p => p.Id == consultaDto.PacienteId))
+        // PUT: api/ConsultasMedicas/5
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutConsultaMedica(int id, ConsultaMedica consultaMedica)
         {
-            return BadRequest("El ID del Paciente no existe.");
+            if (id != consultaMedica.Id)
+            {
+                return BadRequest();
+            }
+
+            using (var _context = GetContextFromToken())
+            {
+                _context.Entry(consultaMedica).State = EntityState.Modified;
+
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    if (!_context.ConsultasMedicas.Any(e => e.Id == id))
+                    {
+                        return NotFound();
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+            }
+
+            return NoContent();
         }
-        if (!await _context.Medicos.AnyAsync(m => m.Id == consultaDto.MedicoId))
+
+        // DELETE: api/ConsultasMedicas/5
+        [Authorize(Roles = "Admin")] // Solo admin puede borrar consultas
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteConsultaMedica(int id)
         {
-            return BadRequest("El ID del Médico no existe.");
+            using (var _context = GetContextFromToken())
+            {
+                var consultaMedica = await _context.ConsultasMedicas.FindAsync(id);
+                if (consultaMedica == null)
+                {
+                    return NotFound();
+                }
+
+                _context.ConsultasMedicas.Remove(consultaMedica);
+                await _context.SaveChangesAsync();
+
+                return NoContent();
+            }
         }
-
-        consulta.PacienteId = consultaDto.PacienteId;
-        consulta.MedicoId = consultaDto.MedicoId;
-        consulta.Motivo = consultaDto.Motivo;
-        consulta.FechaHora = consultaDto.FechaHora.HasValue ? consultaDto.FechaHora.Value : DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return NoContent();
-    }
-
-    // DELETE: api/ConsultasMedicas/5
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteConsultaMedica(int id)
-    {
-        var consulta = await _context.ConsultasMedicas.FindAsync(id);
-        if (consulta == null)
-        {
-            return NotFound();
-        }
-
-        _context.ConsultasMedicas.Remove(consulta);
-        await _context.SaveChangesAsync();
-
-        return NoContent();
     }
 }

@@ -1,162 +1,32 @@
-﻿using MedicalCenter.API.Models.DTOs;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
-[Route("api/[controller]")]
-[ApiController]
-public class EmpleadosController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-
-    public EmpleadosController(MedicalCenterDbContext context)
+    [Authorize(Roles = "Admin")] // <-- SOLO ADMIN PUEDE GESTIONAR EMPLEADOS
+    [Route("api/[controller]")]
+    [ApiController]
+    public class EmpleadosController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
 
-    // GET: api/Empleados
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleados()
-    {
-        return await _context.Empleados
-            .Include(e => e.CentroMedico)
-            .Select(e => new EmpleadoDto
-            {
-                Id = e.Id,
-                Cedula = e.Cedula,
-                Nombre = e.Nombre,
-                Apellido = e.Apellido,
-                Rol = e.Rol,
-                CentroMedicoId = e.CentroMedicoId,
-                NombreCentroMedico = e.CentroMedico != null ? e.CentroMedico.Nombre : "Sin Asignar"
-            })
-            .ToListAsync();
-    }
-
-    // GET: api/Empleados/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<EmpleadoDto>> GetEmpleado(int id)
-    {
-        var empleado = await _context.Empleados
-            .Include(e => e.CentroMedico)
-            .FirstOrDefaultAsync(e => e.Id == id);
-
-        if (empleado == null)
+        public EmpleadosController(GlobalDbContext context)
         {
-            return NotFound();
+            _context = context;
         }
 
-        var empleadoDto = new EmpleadoDto
+        // GET: api/Empleados
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleados()
         {
-            Id = empleado.Id,
-            Cedula = empleado.Cedula,
-            Nombre = empleado.Nombre,
-            Apellido = empleado.Apellido,
-            Rol = empleado.Rol,
-            CentroMedicoId = empleado.CentroMedicoId,
-            NombreCentroMedico = empleado.CentroMedico != null ? empleado.CentroMedico.Nombre : "Sin Asignar"
-        };
-
-        return empleadoDto;
-    }
-
-    // ✅ NUEVO ENDPOINT: Verificar si una cédula existe
-    [HttpGet("existe/{cedula}")]
-    public async Task<ActionResult<object>> ExisteCedula(string cedula)
-    {
-        try
-        {
-            var empleado = await _context.Empleados
-                .FirstOrDefaultAsync(e => e.Cedula == cedula);
-
-            if (empleado == null)
-            {
-                // La cédula NO existe - devolver 404
-                return NotFound(new { message = "Cédula no encontrada" });
-            }
-
-            // La cédula SÍ existe - devolver el ID del empleado
-            return Ok(new { id = empleado.Id });
+            return await _context.Empleados.ToListAsync();
         }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = "Error al verificar cédula", error = ex.Message });
-        }
-    }
 
-    // POST: api/Empleados
-    [HttpPost]
-    public async Task<ActionResult<EmpleadoDto>> PostEmpleado(EmpleadoCreateDto empleadoDto)
-    {
-        try
-        {
-            // ✅ VALIDAR QUE LA CÉDULA NO EXISTA ANTES DE GUARDAR
-            var cedulaExiste = await _context.Empleados
-                .AnyAsync(e => e.Cedula == empleadoDto.Cedula);
-
-            if (cedulaExiste)
-            {
-                return BadRequest(new
-                {
-                    message = $"La cédula {empleadoDto.Cedula} ya está registrada en el sistema."
-                });
-            }
-
-            // Crear el nuevo empleado
-            var nuevoEmpleado = new Empleado
-            {
-                Cedula = empleadoDto.Cedula,
-                Nombre = empleadoDto.Nombre,
-                Apellido = empleadoDto.Apellido,
-                Password = empleadoDto.Password, // ⚠️ Considera hashear en producción
-                Rol = empleadoDto.Rol,
-                CentroMedicoId = empleadoDto.CentroMedicoId
-            };
-
-            _context.Empleados.Add(nuevoEmpleado);
-            await _context.SaveChangesAsync();
-
-            // Cargar la relación para devolver el DTO completo
-            await _context.Entry(nuevoEmpleado).Reference(e => e.CentroMedico).LoadAsync();
-
-            var resultadoDto = new EmpleadoDto
-            {
-                Id = nuevoEmpleado.Id,
-                Cedula = nuevoEmpleado.Cedula,
-                Nombre = nuevoEmpleado.Nombre,
-                Apellido = nuevoEmpleado.Apellido,
-                Rol = nuevoEmpleado.Rol,
-                CentroMedicoId = nuevoEmpleado.CentroMedicoId,
-                NombreCentroMedico = nuevoEmpleado.CentroMedico != null ? nuevoEmpleado.CentroMedico.Nombre : "Sin Asignar"
-            };
-
-            return CreatedAtAction(nameof(GetEmpleado), new { id = resultadoDto.Id }, resultadoDto);
-        }
-        catch (DbUpdateException ex)
-        {
-            // Capturar error de duplicado de cédula a nivel de base de datos
-            if (ex.InnerException?.Message.Contains("Duplicate entry") == true)
-            {
-                return BadRequest(new
-                {
-                    message = $"La cédula {empleadoDto.Cedula} ya está registrada en el sistema."
-                });
-            }
-            return StatusCode(500, new { message = "Error al crear empleado", error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = "Error al crear empleado", error = ex.Message });
-        }
-    }
-
-    // PUT: api/Empleados/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutEmpleado(int id, EmpleadoCreateDto empleadoDto)
-    {
-        try
+        // GET: api/Empleados/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Empleado>> GetEmpleado(int id)
         {
             var empleado = await _context.Empleados.FindAsync(id);
 
@@ -165,64 +35,67 @@ public class EmpleadosController : ControllerBase
                 return NotFound();
             }
 
-            // ✅ VALIDAR que la cédula no esté en uso por OTRO empleado
-            var cedulaEnUso = await _context.Empleados
-                .AnyAsync(e => e.Cedula == empleadoDto.Cedula && e.Id != id);
+            return empleado;
+        }
 
-            if (cedulaEnUso)
+        // PUT: api/Empleados/5
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutEmpleado(int id, Empleado empleado)
+        {
+            if (id != empleado.Id)
             {
-                return BadRequest(new
+                return BadRequest();
+            }
+
+            // Aquí deberías re-hashear la contraseña si ha cambiado
+            // Por ahora, solo actualiza el estado
+            _context.Entry(empleado).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_context.Empleados.Any(e => e.Id == id))
                 {
-                    message = $"La cédula {empleadoDto.Cedula} ya está registrada por otro empleado."
-                });
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
             }
 
-            // Actualizar datos
-            empleado.Cedula = empleadoDto.Cedula;
-            empleado.Nombre = empleadoDto.Nombre;
-            empleado.Apellido = empleadoDto.Apellido;
-            empleado.Rol = empleadoDto.Rol;
-            empleado.CentroMedicoId = empleadoDto.CentroMedicoId;
-
-            // Actualizar contraseña solo si se proporciona
-            if (!string.IsNullOrEmpty(empleadoDto.Password))
-            {
-                empleado.Password = empleadoDto.Password; // ⚠️ Considera hashear en producción
-            }
-
-            await _context.SaveChangesAsync();
             return NoContent();
         }
-        catch (DbUpdateException ex)
+
+        // POST: api/Empleados
+        [HttpPost]
+        public async Task<ActionResult<Empleado>> PostEmpleado(Empleado empleado)
         {
-            if (ex.InnerException?.Message.Contains("Duplicate entry") == true)
+            // Aquí deberías hashear la contraseña antes de guardarla
+            // empleado.Password = Hash(empleado.Password);
+            _context.Empleados.Add(empleado);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction("GetEmpleado", new { id = empleado.Id }, empleado);
+        }
+
+        // DELETE: api/Empleados/5
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteEmpleado(int id)
+        {
+            var empleado = await _context.Empleados.FindAsync(id);
+            if (empleado == null)
             {
-                return BadRequest(new
-                {
-                    message = $"La cédula {empleadoDto.Cedula} ya está registrada por otro empleado."
-                });
+                return NotFound();
             }
-            return StatusCode(500, new { message = "Error al actualizar empleado", error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = "Error al actualizar empleado", error = ex.Message });
-        }
-    }
 
-    // DELETE: api/Empleados/5
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteEmpleado(int id)
-    {
-        var empleado = await _context.Empleados.FindAsync(id);
-        if (empleado == null)
-        {
-            return NotFound();
+            _context.Empleados.Remove(empleado);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
         }
-
-        _context.Empleados.Remove(empleado);
-        await _context.SaveChangesAsync();
-
-        return NoContent();
     }
 }

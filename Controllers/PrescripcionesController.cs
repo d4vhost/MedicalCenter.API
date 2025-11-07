@@ -1,140 +1,143 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using MedicalCenter.API.Models.DTOs;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Security.Claims;
 
-[Route("api/[controller]")]
-[ApiController]
-public class PrescripcionesController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-
-    public PrescripcionesController(MedicalCenterDbContext context)
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class PrescripcionesController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly ILocalDbContextFactory _localContextFactory;
+        private readonly GlobalDbContext _globalContext; // Para validar medicamentos
 
-    // GET: api/Prescripciones
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<PrescripcionDto>>> GetPrescripciones()
-    {
-        return await _context.Prescripciones
-            .Include(p => p.Medicamento)
-            .Select(p => new PrescripcionDto
+        public PrescripcionesController(ILocalDbContextFactory localContextFactory, GlobalDbContext globalContext)
+        {
+            _localContextFactory = localContextFactory;
+            _globalContext = globalContext;
+        }
+
+        // --- Helper para obtener el contexto local correcto ---
+        private LocalDbContext GetContextFromToken()
+        {
+            var centroIdClaim = User.FindFirst("centro_medico_id");
+            if (centroIdClaim == null || !int.TryParse(centroIdClaim.Value, out var centroId))
             {
-                Id = p.Id,
-                DiagnosticoId = p.DiagnosticoId,
-                MedicamentoId = p.MedicamentoId,
-                Indicaciones = p.Indicaciones,
-                NombreMedicamento = (p.Medicamento != null) ? p.Medicamento.NombreGenerico : "Medicamento no encontrado"
-            })
-            .ToListAsync();
-    }
+                throw new InvalidOperationException("Token de usuario no contiene un 'centro_medico_id' válido.");
+            }
+            return _localContextFactory.CreateDbContext(centroId);
+        }
+        // --- Fin del Helper ---
 
-    // GET: api/Prescripciones/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<PrescripcionDto>> GetPrescripcion(int id)
-    {
-        var prescripcion = await _context.Prescripciones
-            .Include(p => p.Medicamento)
-            .FirstOrDefaultAsync(p => p.Id == id);
-
-        if (prescripcion == null)
+        // GET: api/Prescripciones/PorDiagnostico/5
+        [HttpGet("PorDiagnostico/{diagnosticoId}")]
+        public async Task<ActionResult<IEnumerable<Prescripcion>>> GetPrescripcionesPorDiagnostico(int diagnosticoId)
         {
-            return NotFound();
+            using (var _context = GetContextFromToken())
+            {
+                return await _context.Prescripciones
+                    .Where(p => p.DiagnosticoId == diagnosticoId)
+                    .ToListAsync();
+            }
         }
 
-        var dto = new PrescripcionDto
+        // GET: api/Prescripciones/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Prescripcion>> GetPrescripcion(int id)
         {
-            Id = prescripcion.Id,
-            DiagnosticoId = prescripcion.DiagnosticoId,
-            MedicamentoId = prescripcion.MedicamentoId,
-            Indicaciones = prescripcion.Indicaciones,
-            NombreMedicamento = (prescripcion.Medicamento != null) ? prescripcion.Medicamento.NombreGenerico : "Medicamento no encontrado"
-        };
+            using (var _context = GetContextFromToken())
+            {
+                var prescripcion = await _context.Prescripciones.FindAsync(id);
 
-        return Ok(dto);
-    }
+                if (prescripcion == null)
+                {
+                    return NotFound();
+                }
 
-    // POST: api/Prescripciones
-    [HttpPost]
-    public async Task<ActionResult<PrescripcionDto>> PostPrescripcion(PrescripcionCreateDto prescripcionDto)
-    {
-        if (!await _context.Diagnosticos.AnyAsync(d => d.Id == prescripcionDto.DiagnosticoId))
-        {
-            return BadRequest("El ID del diagnóstico no existe.");
-        }
-        if (!await _context.Medicamentos.AnyAsync(m => m.Id == prescripcionDto.MedicamentoId))
-        {
-            return BadRequest("El ID del medicamento no existe.");
+                return prescripcion;
+            }
         }
 
-        var nuevaPrescripcion = new Prescripcion
+        // POST: api/Prescripciones
+        [HttpPost]
+        public async Task<ActionResult<Prescripcion>> PostPrescripcion(Prescripcion prescripcion)
         {
-            DiagnosticoId = prescripcionDto.DiagnosticoId,
-            MedicamentoId = prescripcionDto.MedicamentoId,
-            Indicaciones = prescripcionDto.Indicaciones
-        };
+            // 1. Validar que el Medicamento exista en la DB GLOBAL
+            var medicamentoExiste = await _globalContext.Medicamentos.AnyAsync(m => m.Id == prescripcion.MedicamentoId);
+            if (!medicamentoExiste)
+            {
+                return BadRequest(new { message = "El MedicamentoId no existe en la base de datos global." });
+            }
 
-        _context.Prescripciones.Add(nuevaPrescripcion);
-        await _context.SaveChangesAsync();
+            using (var _context = GetContextFromToken())
+            {
+                // 2. Validar que el Diagnostico exista en la DB LOCAL
+                var diagnosticoExiste = await _context.Diagnosticos.AnyAsync(d => d.Id == prescripcion.DiagnosticoId);
+                if (!diagnosticoExiste)
+                {
+                    return BadRequest(new { message = "El DiagnosticoId no existe en este centro médico." });
+                }
 
-        await _context.Entry(nuevaPrescripcion).Reference(p => p.Medicamento).LoadAsync();
+                // 3. Guardar la prescripción
+                _context.Prescripciones.Add(prescripcion);
+                await _context.SaveChangesAsync();
 
-        var resultadoDto = new PrescripcionDto
-        {
-            Id = nuevaPrescripcion.Id,
-            DiagnosticoId = nuevaPrescripcion.DiagnosticoId,
-            MedicamentoId = nuevaPrescripcion.MedicamentoId,
-            Indicaciones = nuevaPrescripcion.Indicaciones,
-            NombreMedicamento = (nuevaPrescripcion.Medicamento != null) ? nuevaPrescripcion.Medicamento.NombreGenerico : string.Empty
-        };
-
-        return CreatedAtAction(nameof(GetPrescripcion), new { id = resultadoDto.Id }, resultadoDto);
-    }
-
-    // PUT: api/Prescripciones/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutPrescripcion(int id, PrescripcionCreateDto prescripcionDto)
-    {
-        var prescripcion = await _context.Prescripciones.FindAsync(id);
-        if (prescripcion == null)
-        {
-            return NotFound();
+                return CreatedAtAction("GetPrescripcion", new { id = prescripcion.Id }, prescripcion);
+            }
         }
 
-        if (!await _context.Diagnosticos.AnyAsync(d => d.Id == prescripcionDto.DiagnosticoId))
+        // DELETE: api/Prescripciones/5
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeletePrescripcion(int id)
         {
-            return BadRequest("El ID del diagnóstico no existe.");
-        }
-        if (!await _context.Medicamentos.AnyAsync(m => m.Id == prescripcionDto.MedicamentoId))
-        {
-            return BadRequest("El ID del medicamento no existe.");
-        }
+            using (var _context = GetContextFromToken())
+            {
+                var prescripcion = await _context.Prescripciones.FindAsync(id);
+                if (prescripcion == null)
+                {
+                    return NotFound();
+                }
 
-        prescripcion.DiagnosticoId = prescripcionDto.DiagnosticoId;
-        prescripcion.MedicamentoId = prescripcionDto.MedicamentoId;
-        prescripcion.Indicaciones = prescripcionDto.Indicaciones;
+                _context.Prescripciones.Remove(prescripcion);
+                await _context.SaveChangesAsync();
 
-        await _context.SaveChangesAsync();
-        return NoContent();
-    }
-
-    // DELETE: api/Prescripciones/5
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeletePrescripcion(int id)
-    {
-        var prescripcion = await _context.Prescripciones.FindAsync(id);
-        if (prescripcion == null)
-        {
-            return NotFound();
+                return NoContent();
+            }
         }
 
-        _context.Prescripciones.Remove(prescripcion);
-        await _context.SaveChangesAsync();
+        // PUT: api/Prescripciones/5
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutPrescripcion(int id, Prescripcion prescripcion)
+        {
+            if (id != prescripcion.Id)
+            {
+                return BadRequest();
+            }
 
-        return NoContent();
+            using (var _context = GetContextFromToken())
+            {
+                _context.Entry(prescripcion).State = EntityState.Modified;
+
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    if (!_context.Prescripciones.Any(e => e.Id == id))
+                    {
+                        return NotFound();
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+            }
+            return NoContent();
+        }
     }
 }

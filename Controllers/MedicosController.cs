@@ -1,160 +1,116 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using MedicalCenter.API.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using MedicalCenter.API.Models.DTOs;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
-[Route("api/[controller]")]
-[ApiController]
-public class MedicosController : ControllerBase
+namespace MedicalCenter.API.Controllers
 {
-    private readonly MedicalCenterDbContext _context;
-
-    public MedicosController(MedicalCenterDbContext context)
+    [Authorize] // Todos pueden ver
+    [Route("api/[controller]")]
+    [ApiController]
+    public class MedicosController : ControllerBase
     {
-        _context = context;
-    }
+        private readonly GlobalDbContext _context; // <--- CONTEXTO GLOBAL
 
-    // GET: api/Medicos
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<MedicoDto>>> GetMedicos()
-    {
-        return await _context.Medicos
-            .Include(m => m.Empleado)
-                .ThenInclude(e => e.CentroMedico)
-            .Include(m => m.Especialidad)
-            .Select(m => new MedicoDto
+        public MedicosController(GlobalDbContext context)
+        {
+            _context = context;
+        }
+
+        // GET: api/Medicos
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Medico>>> GetMedicos()
+        {
+            // Incluimos Empleado y Especialidad para mostrar info útil
+            return await _context.Medicos
+                .Include(m => m.Empleado)
+                .Include(m => m.Especialidad)
+                .ToListAsync();
+        }
+
+        // GET: api/Medicos/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Medico>> GetMedico(int id)
+        {
+            var medico = await _context.Medicos
+                .Include(m => m.Empleado)
+                .Include(m => m.Especialidad)
+                .FirstOrDefaultAsync(m => m.Id == id);
+
+            if (medico == null)
             {
-                Id = m.Id,
-                EmpleadoId = m.EmpleadoId,
-                // SOLUCIÓN: Comprobamos si Empleado es nulo
-                NombreCompleto = m.Empleado != null ? $"{m.Empleado.Nombre} {m.Empleado.Apellido}" : "Empleado no encontrado",
-                Cedula = m.Empleado != null ? m.Empleado.Cedula : "N/A",
-                EspecialidadId = m.EspecialidadId,
-                NombreEspecialidad = m.Especialidad != null ? m.Especialidad.Nombre : "Sin especialidad",
-                // SOLUCIÓN: Convertimos de forma segura int? a int (o usamos 0 si es nulo)
-                CentroMedicoId = m.Empleado != null ? (m.Empleado.CentroMedicoId ?? 0) : 0,
-                // SOLUCIÓN: Comprobamos la cadena de nulos
-                NombreCentroMedico = (m.Empleado != null && m.Empleado.CentroMedico != null) ? m.Empleado.CentroMedico.Nombre : "Sin centro médico"
-            })
-            .ToListAsync();
-    }
+                return NotFound();
+            }
 
-    // GET: api/Medicos/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<MedicoDto>> GetMedico(int id)
-    {
-        var medico = await _context.Medicos
-            .Include(m => m.Empleado)
-                .ThenInclude(e => e.CentroMedico)
-            .Include(m => m.Especialidad)
-            .FirstOrDefaultAsync(m => m.Id == id);
-
-        if (medico == null)
-        {
-            return NotFound();
+            return medico;
         }
 
-        // SOLUCIÓN: Añadimos comprobaciones de nulos aquí también
-        var medicoDto = new MedicoDto
+        // PUT: api/Medicos/5
+        [Authorize(Roles = "Admin")] // Solo Admin modifica
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutMedico(int id, Medico medico)
         {
-            Id = medico.Id,
-            EmpleadoId = medico.EmpleadoId,
-            NombreCompleto = medico.Empleado != null ? $"{medico.Empleado.Nombre} {medico.Empleado.Apellido}" : "Empleado no encontrado",
-            Cedula = medico.Empleado != null ? medico.Empleado.Cedula : "N/A",
-            EspecialidadId = medico.EspecialidadId,
-            NombreEspecialidad = medico.Especialidad != null ? medico.Especialidad.Nombre : "Sin especialidad",
-            CentroMedicoId = medico.Empleado != null ? (medico.Empleado.CentroMedicoId ?? 0) : 0,
-            NombreCentroMedico = (medico.Empleado != null && medico.Empleado.CentroMedico != null) ? medico.Empleado.CentroMedico.Nombre : "Sin centro médico"
-        };
+            if (id != medico.Id)
+            {
+                return BadRequest();
+            }
 
-        return Ok(medicoDto);
-    }
+            _context.Entry(medico).State = EntityState.Modified;
 
-    // POST: api/Medicos
-    [HttpPost]
-    public async Task<ActionResult<MedicoDto>> PostMedico(MedicoCreateDto medicoDto)
-    {
-        var empleado = await _context.Empleados.FindAsync(medicoDto.EmpleadoId);
-        if (empleado == null)
-        {
-            return BadRequest("El ID del empleado no existe.");
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_context.Medicos.Any(e => e.Id == id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return NoContent();
         }
 
-        var especialidad = await _context.Especialidades.FindAsync(medicoDto.EspecialidadId);
-        if (especialidad == null)
+        // POST: api/Medicos
+        [Authorize(Roles = "Admin")] // Solo Admin crea
+        [HttpPost]
+        public async Task<ActionResult<Medico>> PostMedico(Medico medico)
         {
-            return BadRequest("El ID de la especialidad no existe.");
+            // Validar que el empleado y la especialidad existan
+            var empleadoExiste = await _context.Empleados.AnyAsync(e => e.Id == medico.EmpleadoId);
+            var especialidadExiste = await _context.Especialidades.AnyAsync(e => e.Id == medico.EspecialidadId);
+
+            if (!empleadoExiste || !especialidadExiste)
+            {
+                return BadRequest(new { message = "El EmpleadoId o EspecialidadId no existen." });
+            }
+
+            _context.Medicos.Add(medico);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction("GetMedico", new { id = medico.Id }, medico);
         }
 
-        var nuevoMedico = new Medico
+        // DELETE: api/Medicos/5
+        [Authorize(Roles = "Admin")] // Solo Admin borra
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteMedico(int id)
         {
-            EmpleadoId = medicoDto.EmpleadoId,
-            EspecialidadId = medicoDto.EspecialidadId
-        };
+            var medico = await _context.Medicos.FindAsync(id);
+            if (medico == null)
+            {
+                return NotFound();
+            }
 
-        _context.Medicos.Add(nuevoMedico);
-        await _context.SaveChangesAsync();
+            _context.Medicos.Remove(medico);
+            await _context.SaveChangesAsync();
 
-        // Para devolver el DTO completo, cargamos las relaciones necesarias
-        await _context.Entry(empleado).Reference(e => e.CentroMedico).LoadAsync();
-
-        var resultadoDto = new MedicoDto
-        {
-            Id = nuevoMedico.Id,
-            EmpleadoId = nuevoMedico.EmpleadoId,
-            NombreCompleto = $"{empleado.Nombre} {empleado.Apellido}",
-            Cedula = empleado.Cedula,
-            EspecialidadId = nuevoMedico.EspecialidadId,
-            NombreEspecialidad = especialidad.Nombre,
-            CentroMedicoId = empleado.CentroMedicoId ?? 0,
-            NombreCentroMedico = empleado.CentroMedico != null ? empleado.CentroMedico.Nombre : "Sin centro médico"
-        };
-
-        return CreatedAtAction(nameof(GetMedico), new { id = resultadoDto.Id }, resultadoDto);
-    }
-
-    // PUT: api/Medicos/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutMedico(int id, MedicoCreateDto medicoDto)
-    {
-        var medico = await _context.Medicos.FindAsync(id);
-        if (medico == null)
-        {
-            return NotFound();
+            return NoContent();
         }
-
-        // Por lo general, no se debería cambiar el empleado de un médico, solo su especialidad
-        if (medico.EmpleadoId != medicoDto.EmpleadoId && medicoDto.EmpleadoId != 0)
-        {
-            return BadRequest("No se puede cambiar el empleado asociado a un médico existente.");
-        }
-
-        if (!await _context.Especialidades.AnyAsync(e => e.Id == medicoDto.EspecialidadId))
-        {
-            return BadRequest("El ID de la especialidad no existe.");
-        }
-
-        medico.EspecialidadId = medicoDto.EspecialidadId;
-
-        await _context.SaveChangesAsync();
-        return NoContent();
-    }
-
-    // DELETE: api/Medicos/5
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteMedico(int id)
-    {
-        var medico = await _context.Medicos.FindAsync(id);
-        if (medico == null)
-        {
-            return NotFound();
-        }
-
-        _context.Medicos.Remove(medico);
-        await _context.SaveChangesAsync();
-
-        return NoContent();
     }
 }

@@ -14,11 +14,9 @@ namespace MedicalCenter.API.Data
 
         public LocalDbContext CreateDbContext(int centroMedicoId)
         {
-            string connectionString;
+            // 1. La variable ahora es 'string?' (nullable)
+            string? connectionString;
 
-            // Lógica para seleccionar la cadena de conexión
-            // (Asumimos 1=Quito(Global), 2=Guayaquil, 3=Cuenca)
-            // Esta lógica es un ejemplo, ajústala a tus IDs de Centros Médicos
             switch (centroMedicoId)
             {
                 case 2: // ID de Guayaquil
@@ -28,9 +26,14 @@ namespace MedicalCenter.API.Data
                     connectionString = _configuration.GetConnectionString("CuencaDb");
                     break;
                 default:
-                    // Si es Quito (ID 1) o un admin sin centro, no deberían escribir datos locales
-                    // O puedes tener una lógica por defecto.
-                    throw new Exception("Centro Médico no tiene base de datos local.");
+                    // 2. Manejamos el caso por defecto (ej. Admin o ID inválido)
+                    throw new ArgumentException($"Centro Médico ID no válido o no tiene base de datos local: {centroMedicoId}");
+            }
+
+            // 3. Verificamos si la cadena de conexión es nula O vacía
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                throw new InvalidOperationException($"No se encontró la cadena de conexión para el Centro Médico ID: {centroMedicoId}");
             }
 
             var optionsBuilder = new DbContextOptionsBuilder<LocalDbContext>();
