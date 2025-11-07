@@ -8,7 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization; // <-- Asegúrate de que este 'using' esté presente
 
 namespace MedicalCenter.API.Controllers
 {
@@ -25,6 +25,7 @@ namespace MedicalCenter.API.Controllers
             _configuration = configuration;
         }
 
+        [AllowAnonymous] // <-- ¡MODIFICACIÓN AÑADIDA!
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto loginRequest)
         {
@@ -82,16 +83,16 @@ namespace MedicalCenter.API.Controllers
             }
 
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256); 
 
             var claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
-                new Claim(ClaimTypes.GivenName, empleado.Nombre),
-                new Claim(ClaimTypes.Surname, empleado.Apellido),
-                new Claim(ClaimTypes.Role, empleado.Rol!),
-                new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
-            };
+    {
+        new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
+        new Claim(ClaimTypes.GivenName, empleado.Nombre),
+        new Claim(ClaimTypes.Surname, empleado.Apellido),
+        new Claim(ClaimTypes.Role, empleado.Rol!),
+        new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
+    };
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
