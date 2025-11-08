@@ -80,19 +80,22 @@ namespace MedicalCenter.API.Controllers
         }
 
         // POST: api/Medicos
-        [Authorize(Roles = "ADMINISTRATIVO")] // Solo Admin crea
+        [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpPost]
         public async Task<ActionResult<Medico>> PostMedico(Medico medico)
         {
-            // Validar que el empleado y la especialidad existan
             var empleadoExiste = await _context.Empleados.AnyAsync(e => e.Id == medico.EmpleadoId);
             var especialidadExiste = await _context.Especialidades.AnyAsync(e => e.Id == medico.EspecialidadId);
 
-            if (!empleadoExiste || !especialidadExiste)
+            if (!empleadoExiste)
             {
-                return BadRequest(new { message = "El EmpleadoId o EspecialidadId no existen." });
+                return BadRequest(new { message = $"El EmpleadoId {medico.EmpleadoId} no existe." });
             }
 
+            if (!especialidadExiste)
+            {
+                return BadRequest(new { message = $"El EspecialidadId {medico.EspecialidadId} no existe." });
+            }
             _context.Medicos.Add(medico);
             await _context.SaveChangesAsync();
 

@@ -8,7 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.AspNetCore.Authorization; // <-- Asegúrate de que este 'using' esté presente
+using Microsoft.AspNetCore.Authorization;
 
 namespace MedicalCenter.API.Controllers
 {
@@ -25,7 +25,7 @@ namespace MedicalCenter.API.Controllers
             _configuration = configuration;
         }
 
-        [AllowAnonymous] // <-- ¡MODIFICACIÓN AÑADIDA!
+        [AllowAnonymous]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto loginRequest)
         {
@@ -55,24 +55,30 @@ namespace MedicalCenter.API.Controllers
             });
         }
 
-        // --- NUEVO ENDPOINT SEGURO PARA VERIFICAR CÉDULA ---
-        [Authorize(Roles = "ADMINISTRATIVO")] // Solo administradores pueden usar esto
+        // --- ✅ ENDPOINT PÚBLICO PARA VERIFICAR DISPONIBILIDAD DE CÉDULA ---
+        [AllowAnonymous]
         [HttpGet("CheckCedula/{cedula}")]
         public async Task<IActionResult> CheckCedula(string cedula)
         {
-            var cedulaExists = await _globalContext.Empleados.AnyAsync(e => e.Cedula == cedula);
-            // Si existe, necesitamos saber el ID para comparar si es el mismo empleado (en edición)
-            if (cedulaExists)
+            if (string.IsNullOrWhiteSpace(cedula) || cedula.Length != 10)
             {
-                var empleado = await _globalContext.Empleados
-                    .Where(e => e.Cedula == cedula)
-                    .Select(e => new { e.Id })
-                    .FirstOrDefaultAsync();
-                return Ok(empleado); // Retorna { "id": 123 }
+                return BadRequest(new { message = "Cédula inválida" });
             }
-            return NotFound(); // Retorna 404 si no existe
+
+            var empleado = await _globalContext.Empleados
+                .Where(e => e.Cedula == cedula)
+                .Select(e => new { e.Id })
+                .FirstOrDefaultAsync();
+
+            if (empleado != null)
+            {
+                // La cédula existe, retornar el ID del empleado
+                return Ok(new { id = empleado.Id });
+            }
+
+            // La cédula NO existe (disponible)
+            return NotFound();
         }
-        // ---------------------------------------------------
 
         private string GenerateJwtToken(Empleado empleado)
         {
@@ -83,16 +89,16 @@ namespace MedicalCenter.API.Controllers
             }
 
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256); 
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new List<Claim>
-    {
-        new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
-        new Claim(ClaimTypes.GivenName, empleado.Nombre),
-        new Claim(ClaimTypes.Surname, empleado.Apellido),
-        new Claim(ClaimTypes.Role, empleado.Rol!),
-        new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
-    };
+            {
+                new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
+                new Claim(ClaimTypes.GivenName, empleado.Nombre),
+                new Claim(ClaimTypes.Surname, empleado.Apellido),
+                new Claim(ClaimTypes.Role, empleado.Rol!),
+                new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
+            };
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
