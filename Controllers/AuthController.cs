@@ -1,5 +1,4 @@
 ﻿// Archivo: Controllers/AuthController.cs
-
 using MedicalCenter.API.Data;
 using MedicalCenter.API.Models.DTOs;
 using Microsoft.AspNetCore.Mvc;
@@ -50,16 +49,17 @@ namespace MedicalCenter.API.Controllers
                 Id = empleado.Id,
                 Nombre = empleado.Nombre,
                 Apellido = empleado.Apellido,
-                Rol = empleado.Rol,
+                // --- ✨ CORRECCIÓN 1 (Para el Frontend) ---
+                Rol = empleado.Rol.Trim(),
                 CentroMedicoId = empleado.CentroMedicoId.Value
             });
         }
 
-        // --- ✅ ENDPOINT PÚBLICO PARA VERIFICAR DISPONIBILIDAD DE CÉDULA ---
         [AllowAnonymous]
         [HttpGet("CheckCedula/{cedula}")]
         public async Task<IActionResult> CheckCedula(string cedula)
         {
+            // ... (Este método está bien)
             if (string.IsNullOrWhiteSpace(cedula) || cedula.Length != 10)
             {
                 return BadRequest(new { message = "Cédula inválida" });
@@ -72,11 +72,9 @@ namespace MedicalCenter.API.Controllers
 
             if (empleado != null)
             {
-                // La cédula existe, retornar el ID del empleado
                 return Ok(new { id = empleado.Id });
             }
 
-            // La cédula NO existe (disponible)
             return NotFound();
         }
 
@@ -96,7 +94,11 @@ namespace MedicalCenter.API.Controllers
                 new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
                 new Claim(ClaimTypes.GivenName, empleado.Nombre),
                 new Claim(ClaimTypes.Surname, empleado.Apellido),
-                new Claim(ClaimTypes.Role, empleado.Rol!),
+                
+                // --- ✨ CORRECCIÓN 2 (Para el Token) ---
+                // Esta es la corrección más importante que soluciona el 401
+                new Claim(ClaimTypes.Role, empleado.Rol!.Trim()),
+
                 new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
             };
 
