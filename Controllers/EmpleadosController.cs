@@ -50,12 +50,33 @@ namespace MedicalCenter.API.Controllers
                 return BadRequest();
             }
 
-            // NOTA: Si cambias la contraseña, deberías "hashearla" aquí
+            // 1. BUSCAR EL EMPLEADO QUE YA EXISTE EN LA BD
+            var empleadoExistente = await _context.Empleados.FindAsync(id);
 
-            _context.Entry(empleado).State = EntityState.Modified;
+            if (empleadoExistente == null)
+            {
+                return NotFound(); // Esto es lo que te está pasando ahora (no encuentra el ID)
+            }
+
+            // 2. ACTUALIZAR SOLO LOS CAMPOS DE DATOS (Manual)
+            empleadoExistente.Cedula = empleado.Cedula;
+            empleadoExistente.Nombre = empleado.Nombre;
+            empleadoExistente.Apellido = empleado.Apellido;
+            empleadoExistente.Rol = empleado.Rol;
+            empleadoExistente.CentroMedicoId = empleado.CentroMedicoId;
+
+            // 3. VALIDACIÓN DE SEGURIDAD PARA LA CONTRASEÑA
+            // Solo la actualizamos si el usuario envió una nueva (no vacía)
+            if (!string.IsNullOrEmpty(empleado.Password))
+            {
+                // Aquí podrías hashearla en el futuro
+                empleadoExistente.Password = empleado.Password;
+            }
+            // Si viene vacía, NO tocamos la 'empleadoExistente.Password', conservando la anterior.
 
             try
             {
+                // Guardamos los cambios
                 await _context.SaveChangesAsync();
             }
             catch (DbUpdateConcurrencyException)
