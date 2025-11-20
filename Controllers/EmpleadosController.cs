@@ -1,18 +1,18 @@
 ﻿// Archivo: Controllers/EmpleadosController.cs
 
 using MedicalCenter.API.Data;
+using MedicalCenter.API.Models.DTOs; // <--- ¡IMPORTANTE! Para reconocer EmpleadoUpdateDto y EmpleadoCreateDto
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace MedicalCenter.API.Controllers
 {
-    [Authorize(Roles = "ADMINISTRATIVO")] // <-- SOLO ADMIN PUEDE GESTIONAR EMPLEADOS
+    [Authorize(Roles = "ADMINISTRATIVO")]
     [Route("api/[controller]")]
     [ApiController]
     public class EmpleadosController : ControllerBase
     {
-        // CAMBIO: Inyectar GlobalDbContext
         private readonly GlobalDbContext _context;
 
         public EmpleadosController(GlobalDbContext context)
@@ -24,6 +24,7 @@ namespace MedicalCenter.API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleados()
         {
+            // Retornamos la lista completa de la entidad (esto no afecta tu error actual)
             return await _context.Empleados.ToListAsync();
         }
 
@@ -42,41 +43,43 @@ namespace MedicalCenter.API.Controllers
         }
 
         // PUT: api/Empleados/5
+        // ✅ CAMBIO CLAVE: Recibimos 'EmpleadoUpdateDto' en lugar de 'Empleado'
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutEmpleado(int id, Empleado empleado)
+        public async Task<IActionResult> PutEmpleado(int id, EmpleadoUpdateDto empleadoDto)
         {
-            if (id != empleado.Id)
+            if (id != empleadoDto.Id)
             {
-                return BadRequest();
+                return BadRequest("El ID de la URL no coincide con el ID del cuerpo de la solicitud.");
             }
 
-            // 1. BUSCAR EL EMPLEADO QUE YA EXISTE EN LA BD
+            // 1. BUSCAR EL EMPLEADO EXISTENTE EN LA BD (Para editarlo)
             var empleadoExistente = await _context.Empleados.FindAsync(id);
 
             if (empleadoExistente == null)
             {
-                return NotFound(); // Esto es lo que te está pasando ahora (no encuentra el ID)
+                return NotFound();
             }
 
-            // 2. ACTUALIZAR SOLO LOS CAMPOS DE DATOS (Manual)
-            empleadoExistente.Cedula = empleado.Cedula;
-            empleadoExistente.Nombre = empleado.Nombre;
-            empleadoExistente.Apellido = empleado.Apellido;
-            empleadoExistente.Rol = empleado.Rol;
-            empleadoExistente.CentroMedicoId = empleado.CentroMedicoId;
+            // 2. ACTUALIZAR CAMPOS DE DATOS MANUALMENTE
+            // Pasamos los datos del DTO a la Entidad de base de datos
+            empleadoExistente.Cedula = empleadoDto.Cedula;
+            empleadoExistente.Nombre = empleadoDto.Nombre;
+            empleadoExistente.Apellido = empleadoDto.Apellido;
+            empleadoExistente.Rol = empleadoDto.Rol;
+            empleadoExistente.CentroMedicoId = empleadoDto.CentroMedicoId;
 
-            // 3. VALIDACIÓN DE SEGURIDAD PARA LA CONTRASEÑA
-            // Solo la actualizamos si el usuario envió una nueva (no vacía)
-            if (!string.IsNullOrEmpty(empleado.Password))
+            // 3. ACTUALIZAR CONTRASEÑA SOLO SI SE ENVÍA UNA NUEVA
+            // Como en el UpdateDto la password es opcional (string?), esto no fallará si viene vacía.
+            if (!string.IsNullOrEmpty(empleadoDto.Password))
             {
-                // Aquí podrías hashearla en el futuro
-                empleadoExistente.Password = empleado.Password;
+                // Aquí podrías agregar el hasheo si tuvieras el método
+                empleadoExistente.Password = empleadoDto.Password;
             }
-            // Si viene vacía, NO tocamos la 'empleadoExistente.Password', conservando la anterior.
+            // Si empleadoDto.Password es null o vacío, simplemente NO tocamos empleadoExistente.Password
+            // manteniendo la contraseña vieja.
 
             try
             {
-                // Guardamos los cambios
                 await _context.SaveChangesAsync();
             }
             catch (DbUpdateConcurrencyException)
@@ -95,16 +98,27 @@ namespace MedicalCenter.API.Controllers
         }
 
         // POST: api/Empleados
+        // ✅ CAMBIO: Usamos 'EmpleadoCreateDto' para la creación
         [HttpPost]
-        public async Task<ActionResult<Empleado>> PostEmpleado(Empleado empleado)
+        public async Task<ActionResult<Empleado>> PostEmpleado(EmpleadoCreateDto empleadoDto)
         {
-            // NOTA: Aquí deberías "hashear" la contraseña antes de guardarla
-            // empleado.Password = Hash(empleado.Password);
+            // 1. Convertir el DTO a la Entidad Empleado
+            var nuevoEmpleado = new Empleado
+            {
+                Cedula = empleadoDto.Cedula,
+                Nombre = empleadoDto.Nombre,
+                Apellido = empleadoDto.Apellido,
+                // En el CreateDto, el Password SÍ es obligatorio, así que lo asignamos directo
+                Password = empleadoDto.Password,
+                Rol = empleadoDto.Rol,
+                CentroMedicoId = empleadoDto.CentroMedicoId
+            };
 
-            _context.Empleados.Add(empleado);
+            _context.Empleados.Add(nuevoEmpleado);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction("GetEmpleado", new { id = empleado.Id }, empleado);
+            // Retornamos el empleado creado
+            return CreatedAtAction("GetEmpleado", new { id = nuevoEmpleado.Id }, nuevoEmpleado);
         }
 
         // DELETE: api/Empleados/5

@@ -1,7 +1,7 @@
 ﻿// Archivo: Controllers/MedicosController.cs
 
 using MedicalCenter.API.Data;
-using MedicalCenter.API.Models.DTOs; // <-- ✨ PASO 1: Asegúrate de que este 'using' esté presente
+using MedicalCenter.API.Models.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +24,6 @@ namespace MedicalCenter.API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Medico>>> GetMedicos()
         {
-            // Tu lógica de GET está perfecta (incluye los objetos anidados)
             return await _context.Medicos
                 .Include(m => m.Empleado)
                 .Include(m => m.Especialidad)
@@ -35,7 +34,6 @@ namespace MedicalCenter.API.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Medico>> GetMedico(int id)
         {
-            // Tu lógica de GET por ID está perfecta
             var medico = await _context.Medicos
                 .Include(m => m.Empleado)
                 .Include(m => m.Especialidad)
@@ -52,16 +50,34 @@ namespace MedicalCenter.API.Controllers
         // PUT: api/Medicos/5
         [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutMedico(int id, Medico medico)
+        // ✅ CORRECCIÓN: Usamos MedicoUpdateDto en lugar de la entidad Medico
+        public async Task<IActionResult> PutMedico(int id, MedicoUpdateDto medicoDto)
         {
-            // Esta lógica está bien por ahora, aunque idealmente también usaría un DTO
-            if (id != medico.Id)
+            if (id != medicoDto.Id)
             {
-                return BadRequest();
+                return BadRequest("El ID de la URL no coincide con el del cuerpo.");
             }
 
-            _context.Entry(medico).State = EntityState.Modified;
+            // 1. Buscar el médico existente
+            var medicoExistente = await _context.Medicos.FindAsync(id);
 
+            if (medicoExistente == null)
+            {
+                return NotFound();
+            }
+
+            // 2. Validar que el nuevo empleado y especialidad existan (Opcional pero recomendado)
+            if (!await _context.Empleados.AnyAsync(e => e.Id == medicoDto.EmpleadoId))
+                return BadRequest($"El Empleado ID {medicoDto.EmpleadoId} no existe.");
+
+            if (!await _context.Especialidades.AnyAsync(e => e.Id == medicoDto.EspecialidadId))
+                return BadRequest($"La Especialidad ID {medicoDto.EspecialidadId} no existe.");
+
+            // 3. Actualizar los campos manualmente
+            medicoExistente.EmpleadoId = medicoDto.EmpleadoId;
+            medicoExistente.EspecialidadId = medicoDto.EspecialidadId;
+
+            // Entity Framework detecta los cambios automáticamente aquí
             try
             {
                 await _context.SaveChangesAsync();
@@ -81,15 +97,11 @@ namespace MedicalCenter.API.Controllers
             return NoContent();
         }
 
-        // --- ✨ INICIO DE LA CORRECCIÓN EN POST ---
-
         // POST: api/Medicos
         [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpPost]
-        // ✨ PASO 2: Cambia el parámetro de 'Medico medico' a 'MedicoCreateDto medicoCreateDto'
         public async Task<ActionResult<Medico>> PostMedico(MedicoCreateDto medicoCreateDto)
         {
-            // ✨ PASO 3: Valida usando los IDs del DTO
             var empleadoExiste = await _context.Empleados.AnyAsync(e => e.Id == medicoCreateDto.EmpleadoId);
             var especialidadExiste = await _context.Especialidades.AnyAsync(e => e.Id == medicoCreateDto.EspecialidadId);
 
@@ -103,19 +115,16 @@ namespace MedicalCenter.API.Controllers
                 return BadRequest(new { message = $"El EspecialidadId {medicoCreateDto.EspecialidadId} no existe." });
             }
 
-            // ✨ PASO 4: Crea manualmente la entidad 'Medico' a partir del DTO
             var medico = new Medico
             {
                 EmpleadoId = medicoCreateDto.EmpleadoId,
                 EspecialidadId = medicoCreateDto.EspecialidadId
             };
 
-            // ✨ PASO 5: Añade la nueva entidad al contexto
             _context.Medicos.Add(medico);
             await _context.SaveChangesAsync();
 
-            // ✨ PASO 6 (Opcional pero recomendado): Carga el médico guardado con sus datos
-            // para devolver el objeto completo (tal como lo hace el GET)
+            // Cargar datos completos para la respuesta
             var medicoGuardado = await _context.Medicos
                 .Include(m => m.Empleado)
                 .Include(m => m.Especialidad)
@@ -124,14 +133,11 @@ namespace MedicalCenter.API.Controllers
             return CreatedAtAction("GetMedico", new { id = medico.Id }, medicoGuardado);
         }
 
-        // --- ✨ FIN DE LA CORRECCIÓN EN POST ---
-
         // DELETE: api/Medicos/5
         [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteMedico(int id)
         {
-            // Tu lógica de DELETE está perfecta
             var medico = await _context.Medicos.FindAsync(id);
             if (medico == null)
             {
