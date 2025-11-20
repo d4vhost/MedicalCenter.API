@@ -1,5 +1,5 @@
-﻿// Archivo: Controllers/PacientesController.cs
-using MedicalCenter.API.Data;
+﻿using MedicalCenter.API.Data;
+using MedicalCenter.API.Models.DTOs;
 using MedicalCenter.API.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -21,6 +21,7 @@ namespace MedicalCenter.API.Controllers
             _localContextFactory = localContextFactory;
         }
 
+        // Método auxiliar para obtener el centro del token
         private int? GetCentroIdFromToken()
         {
             var centroIdClaim = User.FindFirst("centro_medico_id");
@@ -31,62 +32,113 @@ namespace MedicalCenter.API.Controllers
             return centroId;
         }
 
-        // GET: api/Pacientes/1/historial
-        [Authorize] // 🔓 Abierto a cualquier usuario autenticado (con o sin rol)
+        // ==========================================
+        // 1. LISTADO DE PACIENTES (CORREGIDO)
+        // ==========================================
+        [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<PacienteDto>>> GetPacientes()
+        {
+            // 1. Obtener datos globales
+            var pacientes = await _context.Pacientes.ToListAsync();
+            var medicos = await _context.Empleados.Where(e => e.Rol == "MEDICO").ToListAsync();
+            var centros = await _context.CentrosMedicos.ToListAsync();
+
+            // 2. Obtener datos locales
+            int nodoPorDefecto = 2;
+            using var localContext = _localContextFactory.CreateDbContext(nodoPorDefecto);
+
+            var consultas = await localContext.ConsultasMedicas.ToListAsync();
+
+            // Traemos solo los diagnósticos que correspondan a las consultas encontradas
+            var consultaIds = consultas.Select(c => c.Id).ToList();
+            var diagnosticos = await localContext.Diagnosticos
+                                    .Where(d => consultaIds.Contains(d.ConsultaId))
+                                    .ToListAsync();
+
+            // 3. Mapear y cruzar información
+            var pacientesDto = pacientes.Select(p =>
+            {
+                // Buscar la última consulta de este paciente
+                var ultimaConsulta = consultas
+                    .Where(c => c.PacienteId == p.Id)
+                    .OrderByDescending(c => c.FechaHora)
+                    .FirstOrDefault();
+
+                string estadoCalculado = "Sin Consultas";
+                string centroMedicoNombre = "No Asignado";
+
+                if (ultimaConsulta != null)
+                {
+                    // Lógica para el ESTADO: Buscamos si existe algún diagnóstico para esta consulta
+                    bool tieneDiagnostico = diagnosticos.Any(d => d.ConsultaId == ultimaConsulta.Id);
+
+                    if (tieneDiagnostico)
+                    {
+                        estadoCalculado = "Finalizado";
+                    }
+                    else
+                    {
+                        estadoCalculado = "En Proceso";
+                    }
+
+                    // Lógica para el CENTRO MÉDICO
+                    var medicoQueAtendio = medicos.FirstOrDefault(m => m.Id == ultimaConsulta.MedicoId);
+                    if (medicoQueAtendio != null)
+                    {
+                        var centro = centros.FirstOrDefault(c => c.Id == medicoQueAtendio.CentroMedicoId);
+                        if (centro != null)
+                        {
+                            centroMedicoNombre = centro.Nombre;
+                        }
+                    }
+                }
+
+                return new PacienteDto
+                {
+                    Id = p.Id,
+                    Cedula = p.Cedula,
+                    Nombre = p.Nombre,
+                    Apellido = p.Apellido,
+                    FechaNacimiento = p.FechaNacimiento, // ✅ Ahora acepta nullable
+                    Direccion = p.Direccion,
+                    Estado = estadoCalculado,
+                    CentroMedico = centroMedicoNombre
+                };
+            }).ToList();
+
+            return Ok(pacientesDto);
+        }
+
+        // ==========================================
+        // 2. HISTORIAL
+        // ==========================================
+        [Authorize]
         [HttpGet("{id}/historial")]
         public async Task<ActionResult<object>> GetHistorialPaciente(int id)
         {
-            // --- 1. VALIDACIÓN DE SEGURIDAD ---
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            // Si NO tiene rol (es Paciente), verificamos que solo consulte su propia data
             if (string.IsNullOrEmpty(userRole))
             {
                 if (userId == null || userId != id.ToString())
-                    return Forbid(); // ⛔ No puede ver historial ajeno
+                    return Forbid();
             }
             else
             {
-                // Si tiene rol, verificamos que sea personal autorizado
                 if (userRole != "ADMINISTRATIVO" && userRole != "MEDICO")
                     return Forbid();
             }
 
-            // --- 2. VALIDAR EXISTENCIA DEL PACIENTE ---
             var paciente = await _context.Pacientes.FindAsync(id);
             if (paciente == null) return NotFound(new { message = "Paciente no encontrado." });
 
-            // --- 3. DETERMINAR DÓNDE BUSCAR LOS DATOS ---
             var centroIdToken = GetCentroIdFromToken();
-
-            // Lista de centros a consultar. 
-            // Si es médico/admin, usamos SU centro.
-            // Si es paciente (token sin centro), usamos los centros por defecto (ej. ID 2 y 3)
-            var centrosAConsultar = new List<int>();
-
-            if (centroIdToken.HasValue)
-            {
-                centrosAConsultar.Add(centroIdToken.Value);
-            }
-            else
-            {
-                // Lógica para Paciente: Consultar bases locales disponibles.
-                // En tu caso, tus datos están en el nodo 2 (Guayaquil).
-                centrosAConsultar.Add(2);
-                // Si tuvieras más nodos activos, podrías agregarlos aquí: centrosAConsultar.Add(3);
-            }
-
-            // --- 4. CONSULTA Y CONSOLIDACIÓN ---
-            // Usamos el primer centro disponible (para simplificar la respuesta JSON)
-            // En un sistema real haríamos un 'foreach' y uniríamos las listas.
-            if (!centrosAConsultar.Any()) return BadRequest("No se pudo determinar el centro de datos.");
-
-            var centroTarget = centrosAConsultar.First();
+            int centroTarget = centroIdToken.HasValue ? centroIdToken.Value : 2;
 
             using (var localContext = _localContextFactory.CreateDbContext(centroTarget))
             {
-                // A) Consultas (Proyección anónima)
                 var consultas = await localContext.ConsultasMedicas
                     .Where(c => c.PacienteId == id)
                     .OrderByDescending(c => c.FechaHora)
@@ -98,13 +150,11 @@ namespace MedicalCenter.API.Controllers
                     return Ok(new { consultas = new List<object>(), diagnosticos = new List<object>(), prescripciones = new List<object>() });
                 }
 
-                // B) Diagnósticos
                 var consultaIds = consultas.Select(c => c.Id).ToList();
                 var diagnosticosData = await localContext.Diagnosticos
                     .Where(d => consultaIds.Contains(d.ConsultaId))
                     .ToListAsync();
 
-                // Proyección Diagnósticos
                 var diagnosticosResult = diagnosticosData.Select(d => new
                 {
                     d.Id,
@@ -113,13 +163,11 @@ namespace MedicalCenter.API.Controllers
                     d.Observaciones
                 }).ToList();
 
-                // C) Prescripciones
                 var diagnosticoIds = diagnosticosData.Select(d => d.Id).ToList();
                 var prescripciones = await localContext.Prescripciones
                     .Where(p => diagnosticoIds.Contains(p.DiagnosticoId))
                     .ToListAsync();
 
-                // D) Nombres de Medicamentos (Global)
                 var medicamentoIds = prescripciones.Select(p => p.MedicamentoId).Distinct().ToList();
                 var medicamentosInfo = await _context.Medicamentos
                     .Where(m => medicamentoIds.Contains(m.Id))
@@ -143,18 +191,66 @@ namespace MedicalCenter.API.Controllers
             }
         }
 
-        // --- LOS DEMÁS MÉTODOS SIGUEN PROTEGIDOS IGUAL ---
-
-        [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Paciente>>> GetPacientes() => await _context.Pacientes.ToListAsync();
+        // ==========================================
+        // 3. OTROS MÉTODOS CRUD
+        // ==========================================
 
         [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
         [HttpGet("{id}")]
-        public async Task<ActionResult<Paciente>> GetPaciente(int id)
+        public async Task<ActionResult<PacienteDto>> GetPaciente(int id)
         {
             var paciente = await _context.Pacientes.FindAsync(id);
-            return paciente != null ? paciente : NotFound();
+            if (paciente == null) return NotFound();
+
+            return new PacienteDto
+            {
+                Id = paciente.Id,
+                Cedula = paciente.Cedula,
+                Nombre = paciente.Nombre,
+                Apellido = paciente.Apellido,
+                FechaNacimiento = paciente.FechaNacimiento, // ✅ Ahora acepta nullable
+                Direccion = paciente.Direccion
+            };
+        }
+
+        [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
+        [HttpPost]
+        public async Task<ActionResult<PacienteDto>> PostPaciente(PacienteCreateDto pacienteDto)
+        {
+            if (await _context.Pacientes.AnyAsync(p => p.Cedula == pacienteDto.Cedula))
+            {
+                return BadRequest("Ya existe un paciente con esa cédula.");
+            }
+
+            // ✅ Validación de fecha de nacimiento
+            if (!pacienteDto.FechaNacimiento.HasValue)
+            {
+                return BadRequest("La fecha de nacimiento es obligatoria.");
+            }
+
+            var paciente = new Paciente
+            {
+                Cedula = pacienteDto.Cedula,
+                Nombre = pacienteDto.Nombre.ToUpper(),
+                Apellido = pacienteDto.Apellido.ToUpper(),
+                FechaNacimiento = pacienteDto.FechaNacimiento.Value, // ✅ Extrae el valor
+                Direccion = pacienteDto.Direccion?.ToUpper()
+            };
+
+            _context.Pacientes.Add(paciente);
+            await _context.SaveChangesAsync();
+
+            var newPacienteDto = new PacienteDto
+            {
+                Id = paciente.Id,
+                Cedula = paciente.Cedula,
+                Nombre = paciente.Nombre,
+                Apellido = paciente.Apellido,
+                FechaNacimiento = paciente.FechaNacimiento, // ✅ Ahora es compatible
+                Direccion = paciente.Direccion
+            };
+
+            return CreatedAtAction("GetPaciente", new { id = paciente.Id }, newPacienteDto);
         }
 
         [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
@@ -165,15 +261,6 @@ namespace MedicalCenter.API.Controllers
             _context.Entry(paciente).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
-        }
-
-        [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
-        [HttpPost]
-        public async Task<ActionResult<Paciente>> PostPaciente(Paciente paciente)
-        {
-            _context.Pacientes.Add(paciente);
-            await _context.SaveChangesAsync();
-            return CreatedAtAction("GetPaciente", new { id = paciente.Id }, paciente);
         }
 
         [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
