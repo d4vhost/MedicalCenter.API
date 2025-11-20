@@ -1,6 +1,6 @@
 ﻿using MedicalCenter.API.Data;
 using MedicalCenter.API.Models.DTOs;
-using MedicalCenter.API.Models.Entities;
+using MedicalCenter.API.Models.Entities; // ✨ Asegúrate de tener este using
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -77,6 +77,7 @@ namespace MedicalCenter.API.Controllers
             }
         }
 
+        // POST: api/ConsultasMedicas
         [HttpPost]
         [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
         public async Task<ActionResult<ConsultaMedica>> PostConsultaMedica(ConsultaMedicaCreateDto consultaDto)
@@ -98,13 +99,12 @@ namespace MedicalCenter.API.Controllers
             // 2. GUARDADO EN LOCAL
             using (var context = GetContextFromToken(centroId.Value))
             {
-                // Crear instancia sin especificar el namespace completo
-                // porque ya lo importamos arriba
-                var nuevaConsulta = new ConsultaMedica
+                // ✨ SOLUCIÓN: Usa el namespace completo o asegúrate de usar el correcto
+                var nuevaConsulta = new MedicalCenter.API.Models.Entities.ConsultaMedica
                 {
                     PacienteId = consultaDto.PacienteId,
                     MedicoId = consultaDto.MedicoId,
-                    Motivo = consultaDto.Motivo,
+                    Motivo = consultaDto.Motivo ?? string.Empty, 
                     FechaHora = consultaDto.FechaHora ?? DateTime.Now
                 };
 

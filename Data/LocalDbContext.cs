@@ -1,4 +1,5 @@
 ﻿// Archivo: Data/LocalDbContext.cs
+using MedicalCenter.API.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace MedicalCenter.API.Data
