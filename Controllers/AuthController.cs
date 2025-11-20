@@ -24,6 +24,7 @@ namespace MedicalCenter.API.Controllers
             _configuration = configuration;
         }
 
+        // --- LOGIN EMPLEADOS (Se mantiene igual) ---
         [AllowAnonymous]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto loginRequest)
@@ -32,14 +33,10 @@ namespace MedicalCenter.API.Controllers
                 .FirstOrDefaultAsync(e => e.Cedula == loginRequest.Cedula);
 
             if (empleado == null || empleado.Password != loginRequest.Password)
-            {
                 return Unauthorized(new { message = "Cédula o contraseña incorrecta." });
-            }
 
             if (string.IsNullOrEmpty(empleado.Rol) || empleado.CentroMedicoId == null)
-            {
-                return Unauthorized(new { message = "La cuenta del empleado no está configurada correctamente (falta Rol o Centro Médico)." });
-            }
+                return Unauthorized(new { message = "Cuenta no configurada correctamente." });
 
             var token = GenerateJwtToken(empleado);
 
@@ -49,44 +46,57 @@ namespace MedicalCenter.API.Controllers
                 Id = empleado.Id,
                 Nombre = empleado.Nombre,
                 Apellido = empleado.Apellido,
-                // --- ✨ CORRECCIÓN 1 (Para el Frontend) ---
                 Rol = empleado.Rol.Trim(),
                 CentroMedicoId = empleado.CentroMedicoId.Value
             });
         }
 
+        // --- LOGIN PACIENTES (NUEVO Y LIMPIO) ---
+        [AllowAnonymous]
+        [HttpPost("login-paciente")]
+        public async Task<IActionResult> LoginPaciente([FromBody] PacienteLoginRequestDto request)
+        {
+            // 1. Buscar en Global
+            var paciente = await _globalContext.Pacientes
+                .FirstOrDefaultAsync(p => p.Cedula == request.Cedula);
+
+            if (paciente == null) return NotFound(new { message = "Cédula no encontrada." });
+
+            // 2. Validar Fecha
+            if (paciente.FechaNacimiento?.Date != request.FechaNacimiento.Date)
+                return Unauthorized(new { message = "Fecha de nacimiento incorrecta." });
+
+            // 3. Token SIN Roles y SIN Centro Médico
+            var token = GenerateJwtTokenPaciente(paciente);
+
+            return Ok(new
+            {
+                token = token,
+                empleadoId = paciente.Id,
+                nombreCompleto = $"{paciente.Nombre} {paciente.Apellido}"
+            });
+        }
+
+        // ... (CheckCedula y GenerateJwtToken de empleado igual) ...
         [AllowAnonymous]
         [HttpGet("CheckCedula/{cedula}")]
         public async Task<IActionResult> CheckCedula(string cedula)
         {
-            // ... (Este método está bien)
             if (string.IsNullOrWhiteSpace(cedula) || cedula.Length != 10)
-            {
                 return BadRequest(new { message = "Cédula inválida" });
-            }
 
             var empleado = await _globalContext.Empleados
                 .Where(e => e.Cedula == cedula)
                 .Select(e => new { e.Id })
                 .FirstOrDefaultAsync();
 
-            if (empleado != null)
-            {
-                return Ok(new { id = empleado.Id });
-            }
-
-            return NotFound();
+            return (empleado != null) ? Ok(new { id = empleado.Id }) : NotFound();
         }
 
         private string GenerateJwtToken(Empleado empleado)
         {
             var jwtKey = _configuration["JWT:Key"];
-            if (string.IsNullOrEmpty(jwtKey))
-            {
-                throw new InvalidOperationException("JWT Key no está configurada en appsettings.json");
-            }
-
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new List<Claim>
@@ -94,26 +104,44 @@ namespace MedicalCenter.API.Controllers
                 new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
                 new Claim(ClaimTypes.GivenName, empleado.Nombre),
                 new Claim(ClaimTypes.Surname, empleado.Apellido),
-                
-                // --- ✨ CORRECCIÓN 2 (Para el Token) ---
-                // Esta es la corrección más importante que soluciona el 401
                 new Claim(ClaimTypes.Role, empleado.Rol!.Trim()),
-
                 new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
             };
 
-            var tokenDescriptor = new SecurityTokenDescriptor
+            var token = new JwtSecurityToken(
+                _configuration["JWT:Issuer"],
+                _configuration["JWT:Audience"],
+                claims,
+                expires: DateTime.UtcNow.AddHours(8),
+                signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        // --- TOKEN PACIENTE (SIN "TRUCOS") ---
+        private string GenerateJwtTokenPaciente(Paciente paciente)
+        {
+            var jwtKey = _configuration["JWT:Key"];
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+            var claims = new List<Claim>
             {
-                Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddHours(8),
-                Issuer = _configuration["JWT:Issuer"],
-                Audience = _configuration["JWT:Audience"],
-                SigningCredentials = credentials
+                // Solo la identidad del paciente
+                new Claim(ClaimTypes.NameIdentifier, paciente.Id.ToString()),
+                new Claim(ClaimTypes.GivenName, paciente.Nombre),
+                new Claim(ClaimTypes.Surname, paciente.Apellido)
+                // ¡SIN ROL Y SIN CENTRO ID!
             };
 
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            return tokenHandler.WriteToken(token);
+            var token = new JwtSecurityToken(
+                _configuration["JWT:Issuer"],
+                _configuration["JWT:Audience"],
+                claims,
+                expires: DateTime.UtcNow.AddHours(2),
+                signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
 }
