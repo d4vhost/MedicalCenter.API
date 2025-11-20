@@ -1,24 +1,35 @@
-﻿using System;
-using System.Collections.Generic; // Asegúrate de tener este using
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+// Asegúrate de tener este using si usas JsonIgnore
+using System.Text.Json.Serialization;
 
-public class ConsultaMedica
+namespace MedicalCenter.API.Models.Entities
 {
-    [Key]
-    public int Id { get; set; }
+    [Table("consultas_medicas")]
+    public class ConsultaMedica
+    {
+        [Key]
+        [Column("id")]
+        public int Id { get; set; }
 
-    public DateTime FechaHora { get; set; }
+        [Column("fecha_hora")]
+        public DateTime FechaHora { get; set; }
 
-    public int PacienteId { get; set; }
-    [ForeignKey("PacienteId")]
-    public virtual Paciente Paciente { get; set; } = null!;
+        [Column("paciente_id")]
+        public int PacienteId { get; set; }
 
-    public int MedicoId { get; set; }
-    [ForeignKey("MedicoId")]
-    public virtual Medico Medico { get; set; } = null!;
+        [Column("medico_id")]
+        public int MedicoId { get; set; }
 
-    public string? Motivo { get; set; }
+        [Column("motivo")]
+        public string Motivo { get; set; } = string.Empty;
 
-    public virtual ICollection<Diagnostico> Diagnosticos { get; set; } = new List<Diagnostico>();
+        [ForeignKey("PacienteId")]
+        [JsonIgnore]
+        public virtual Paciente? Paciente { get; set; }
+
+        [ForeignKey("MedicoId")]
+        [JsonIgnore]
+        public virtual Medico? Medico { get; set; }
+    }
 }
