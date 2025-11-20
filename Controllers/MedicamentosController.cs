@@ -1,5 +1,4 @@
 ﻿// Archivo: Controllers/MedicamentosController.cs
-
 using MedicalCenter.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,12 +6,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MedicalCenter.API.Controllers
 {
-    [Authorize] // Todos pueden ver
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class MedicamentosController : ControllerBase
     {
-        // CAMBIO: Inyectar GlobalDbContext
         private readonly GlobalDbContext _context;
 
         public MedicamentosController(GlobalDbContext context)
@@ -21,6 +19,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // GET: api/Medicamentos
+        // Todos los roles autenticados pueden ver la lista
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Medicamento>>> GetMedicamentos()
         {
@@ -42,7 +41,8 @@ namespace MedicalCenter.API.Controllers
         }
 
         // PUT: api/Medicamentos/5
-        [Authorize(Roles = "ADMINISTRATIVO")] // Solo Admin modifica
+        // SOLO ADMIN puede modificar medicamentos existentes
+        [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpPut("{id}")]
         public async Task<IActionResult> PutMedicamento(int id, Medicamento medicamento)
         {
@@ -73,7 +73,8 @@ namespace MedicalCenter.API.Controllers
         }
 
         // POST: api/Medicamentos
-        [Authorize(Roles = "ADMINISTRATIVO")] // Solo Admin crea
+        // ✨ CAMBIO: ADMIN y MEDICO pueden crear nuevos medicamentos
+        [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
         [HttpPost]
         public async Task<ActionResult<Medicamento>> PostMedicamento(Medicamento medicamento)
         {
@@ -84,7 +85,8 @@ namespace MedicalCenter.API.Controllers
         }
 
         // DELETE: api/Medicamentos/5
-        [Authorize(Roles = "ADMINISTRATIVO")] // Solo Admin borra
+        // SOLO ADMIN puede borrar medicamentos
+        [Authorize(Roles = "ADMINISTRATIVO")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteMedicamento(int id)
         {
