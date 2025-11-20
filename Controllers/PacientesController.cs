@@ -33,7 +33,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // ==========================================
-        // 1. LISTADO DE PACIENTES (CORREGIDO)
+        // 1. LISTADO DE PACIENTES
         // ==========================================
         [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
         [HttpGet]
@@ -111,7 +111,7 @@ namespace MedicalCenter.API.Controllers
         }
 
         // ==========================================
-        // 2. HISTORIAL
+        // 2. HISTORIAL (CORREGIDO PARA BUSCAR EN TODOS LOS NODOS)
         // ==========================================
         [Authorize]
         [HttpGet("{id}/historial")]
@@ -120,75 +120,105 @@ namespace MedicalCenter.API.Controllers
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            if (string.IsNullOrEmpty(userRole))
+            // 1. Validaciones de Seguridad
+            bool esPersonalSalud = userRole == "ADMINISTRATIVO" || userRole == "MEDICO";
+            bool esElPropioPaciente = userRole == "PACIENTE" && userId == id.ToString();
+
+            if (!esPersonalSalud && !esElPropioPaciente)
             {
-                if (userId == null || userId != id.ToString())
-                    return Forbid();
-            }
-            else
-            {
-                if (userRole != "ADMINISTRATIVO" && userRole != "MEDICO")
-                    return Forbid();
+                return Forbid();
             }
 
+            // 2. Validar que el paciente exista en la Global
             var paciente = await _context.Pacientes.FindAsync(id);
             if (paciente == null) return NotFound(new { message = "Paciente no encontrado." });
 
-            var centroIdToken = GetCentroIdFromToken();
-            int centroTarget = centroIdToken.HasValue ? centroIdToken.Value : 2;
+            // --- LISTAS PARA ACUMULAR DATOS DE TODOS LOS NODOS ---
+            var todasConsultas = new List<object>();
+            var todosDiagnosticos = new List<object>();
+            var todasPrescripciones = new List<object>();
 
-            using (var localContext = _localContextFactory.CreateDbContext(centroTarget))
+            // 3. DEFINIR QUÉ NODOS VAMOS A CONSULTAR
+            // Si es un médico, quizás solo quieras ver su centro. 
+            // Pero si es el PACIENTE, él quiere ver TODO su historial sin importar el hospital.
+            // Aquí definimos los IDs de tus nodos configurados en LocalDbContextFactory (2: Guayaquil, 3: Cuenca)
+            List<int> nodosAconsultar = new List<int> { 2, 3 };
+
+            // 4. RECORRER CADA NODO Y EXTRAER INFORMACIÓN
+            foreach (var nodoId in nodosAconsultar)
             {
-                var consultas = await localContext.ConsultasMedicas
-                    .Where(c => c.PacienteId == id)
-                    .OrderByDescending(c => c.FechaHora)
-                    .Select(c => new { c.Id, c.FechaHora, c.PacienteId, c.MedicoId, c.Motivo })
-                    .ToListAsync();
-
-                if (!consultas.Any())
+                try
                 {
-                    return Ok(new { consultas = new List<object>(), diagnosticos = new List<object>(), prescripciones = new List<object>() });
+                    using (var localContext = _localContextFactory.CreateDbContext(nodoId))
+                    {
+                        // A. Buscar consultas en este nodo
+                        var consultas = await localContext.ConsultasMedicas
+                            .Where(c => c.PacienteId == id)
+                            .OrderByDescending(c => c.FechaHora)
+                            .Select(c => new { c.Id, c.FechaHora, c.PacienteId, c.MedicoId, c.Motivo, NodoOrigen = nodoId }) // Agregamos NodoOrigen para saber de dónde vino
+                            .ToListAsync();
+
+                        if (consultas.Any())
+                        {
+                            // Agregamos las consultas encontradas a la lista general
+                            todasConsultas.AddRange(consultas);
+
+                            // B. Buscar Diagnósticos vinculados a estas consultas
+                            var consultaIds = consultas.Select(c => c.Id).ToList();
+                            var diagnosticosData = await localContext.Diagnosticos
+                                .Where(d => consultaIds.Contains(d.ConsultaId))
+                                .ToListAsync();
+
+                            var diagnosticosResult = diagnosticosData.Select(d => new
+                            {
+                                d.Id,
+                                d.ConsultaId,
+                                d.EnfermedadNombre,
+                                d.Observaciones,
+                                NodoOrigen = nodoId
+                            }).ToList();
+                            todosDiagnosticos.AddRange(diagnosticosResult);
+
+                            // C. Buscar Prescripciones vinculadas a estos diagnósticos
+                            var diagnosticoIds = diagnosticosData.Select(d => d.Id).ToList();
+                            var prescripciones = await localContext.Prescripciones
+                                .Where(p => diagnosticoIds.Contains(p.DiagnosticoId))
+                                .ToListAsync();
+
+                            // Para los nombres de medicamentos, consultamos la DB Global (solo IDs nuevos)
+                            var medicamentoIds = prescripciones.Select(p => p.MedicamentoId).Distinct().ToList();
+                            var medicamentosInfo = await _context.Medicamentos
+                                .Where(m => medicamentoIds.Contains(m.Id))
+                                .ToDictionaryAsync(m => m.Id, m => m.NombreGenerico);
+
+                            var prescripcionesDto = prescripciones.Select(p => new
+                            {
+                                p.Id,
+                                p.DiagnosticoId,
+                                p.MedicamentoId,
+                                NombreMedicamento = medicamentosInfo.ContainsKey(p.MedicamentoId) ? medicamentosInfo[p.MedicamentoId] : "DESCONOCIDO",
+                                p.Indicaciones,
+                                NodoOrigen = nodoId
+                            }).ToList();
+                            todasPrescripciones.AddRange(prescripcionesDto);
+                        }
+                    }
                 }
-
-                var consultaIds = consultas.Select(c => c.Id).ToList();
-                var diagnosticosData = await localContext.Diagnosticos
-                    .Where(d => consultaIds.Contains(d.ConsultaId))
-                    .ToListAsync();
-
-                var diagnosticosResult = diagnosticosData.Select(d => new
+                catch (Exception ex)
                 {
-                    d.Id,
-                    d.ConsultaId,
-                    d.EnfermedadNombre,
-                    d.Observaciones
-                }).ToList();
-
-                var diagnosticoIds = diagnosticosData.Select(d => d.Id).ToList();
-                var prescripciones = await localContext.Prescripciones
-                    .Where(p => diagnosticoIds.Contains(p.DiagnosticoId))
-                    .ToListAsync();
-
-                var medicamentoIds = prescripciones.Select(p => p.MedicamentoId).Distinct().ToList();
-                var medicamentosInfo = await _context.Medicamentos
-                    .Where(m => medicamentoIds.Contains(m.Id))
-                    .ToDictionaryAsync(m => m.Id, m => m.NombreGenerico);
-
-                var prescripcionesDto = prescripciones.Select(p => new
-                {
-                    p.Id,
-                    p.DiagnosticoId,
-                    p.MedicamentoId,
-                    NombreMedicamento = medicamentosInfo.ContainsKey(p.MedicamentoId) ? medicamentosInfo[p.MedicamentoId] : "DESCONOCIDO",
-                    p.Indicaciones
-                }).ToList();
-
-                return Ok(new
-                {
-                    consultas,
-                    diagnosticos = diagnosticosResult,
-                    prescripciones = prescripcionesDto
-                });
+                    // Si un nodo está apagado (ej. se cayó el server de Cuenca), 
+                    // capturamos el error para seguir mostrando la info de los otros nodos.
+                    Console.WriteLine($"Error conectando al nodo {nodoId}: {ex.Message}");
+                }
             }
+
+            // 5. RETORNAR LA INFORMACIÓN CONSOLIDADA
+            return Ok(new
+            {
+                consultas = todasConsultas.OrderByDescending(x => ((dynamic)x).FechaHora), // Reordenar por fecha mezclada
+                diagnosticos = todosDiagnosticos,
+                prescripciones = todasPrescripciones
+            });
         }
 
         // ==========================================
