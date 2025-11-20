@@ -1,5 +1,4 @@
-﻿// Archivo: Controllers/AuthController.cs
-using MedicalCenter.API.Data;
+﻿using MedicalCenter.API.Data;
 using MedicalCenter.API.Models.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,22 +23,31 @@ namespace MedicalCenter.API.Controllers
             _configuration = configuration;
         }
 
-        // --- LOGIN EMPLEADOS (Se mantiene igual) ---
+        // --- LOGIN DE EMPLEADOS (MÉDICOS Y ADMINISTRATIVOS) ---
         [AllowAnonymous]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto loginRequest)
         {
+            // 1. Buscar empleado por Cédula
             var empleado = await _globalContext.Empleados
                 .FirstOrDefaultAsync(e => e.Cedula == loginRequest.Cedula);
 
+            // 2. Validar existencia y contraseña (texto plano por ahora)
             if (empleado == null || empleado.Password != loginRequest.Password)
                 return Unauthorized(new { message = "Cédula o contraseña incorrecta." });
 
+            // 3. Validar que la cuenta esté configurada correctamente (Rol y Centro Médico obligatorios)
+            // Gracias al arreglo en GlobalDbContext, estos datos ya no deberían llegar nulos.
             if (string.IsNullOrEmpty(empleado.Rol) || empleado.CentroMedicoId == null)
-                return Unauthorized(new { message = "Cuenta no configurada correctamente." });
+            {
+                // Nota: Si ves este error, revisa el mapeo en GlobalDbContext.cs (snake_case vs PascalCase)
+                return Unauthorized(new { message = "Cuenta no configurada correctamente (Falta Rol o Centro Médico)." });
+            }
 
+            // 4. Generar Token JWT
             var token = GenerateJwtToken(empleado);
 
+            // 5. Responder con datos y token
             return Ok(new LoginResponseDto
             {
                 Token = token,
@@ -51,33 +59,37 @@ namespace MedicalCenter.API.Controllers
             });
         }
 
-        // --- LOGIN PACIENTES (NUEVO Y LIMPIO) ---
+        // --- LOGIN DE PACIENTES ---
         [AllowAnonymous]
         [HttpPost("login-paciente")]
         public async Task<IActionResult> LoginPaciente([FromBody] PacienteLoginRequestDto request)
         {
-            // 1. Buscar en Global
+            // 1. Buscar Paciente en DB Global
             var paciente = await _globalContext.Pacientes
                 .FirstOrDefaultAsync(p => p.Cedula == request.Cedula);
 
-            if (paciente == null) return NotFound(new { message = "Cédula no encontrada." });
+            if (paciente == null)
+                return NotFound(new { message = "Cédula no encontrada." });
 
-            // 2. Validar Fecha
-            if (paciente.FechaNacimiento?.Date != request.FechaNacimiento.Date)
+            // 2. Validar Fecha de Nacimiento
+            if (!paciente.FechaNacimiento.HasValue ||
+                paciente.FechaNacimiento.Value.Date != request.FechaNacimiento.Date)
+            {
                 return Unauthorized(new { message = "Fecha de nacimiento incorrecta." });
+            }
 
-            // 3. Token SIN Roles y SIN Centro Médico
+            // 3. Generar Token específico para Paciente
             var token = GenerateJwtTokenPaciente(paciente);
 
             return Ok(new
             {
                 token = token,
-                empleadoId = paciente.Id,
+                empleadoId = paciente.Id, // Usamos la misma propiedad en el frontend para el ID
                 nombreCompleto = $"{paciente.Nombre} {paciente.Apellido}"
             });
         }
 
-        // ... (CheckCedula y GenerateJwtToken de empleado igual) ...
+        // --- VERIFICAR CÉDULA (USADO EN REGISTRO/VALIDACIONES) ---
         [AllowAnonymous]
         [HttpGet("CheckCedula/{cedula}")]
         public async Task<IActionResult> CheckCedula(string cedula)
@@ -93,10 +105,14 @@ namespace MedicalCenter.API.Controllers
             return (empleado != null) ? Ok(new { id = empleado.Id }) : NotFound();
         }
 
+        // --- MÉTODOS PRIVADOS PARA GENERAR TOKENS ---
+
         private string GenerateJwtToken(Empleado empleado)
         {
             var jwtKey = _configuration["JWT:Key"];
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!));
+            if (string.IsNullOrEmpty(jwtKey)) throw new Exception("Falta configuración JWT:Key");
+
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new List<Claim>
@@ -104,7 +120,7 @@ namespace MedicalCenter.API.Controllers
                 new Claim(ClaimTypes.NameIdentifier, empleado.Id.ToString()),
                 new Claim(ClaimTypes.GivenName, empleado.Nombre),
                 new Claim(ClaimTypes.Surname, empleado.Apellido),
-                new Claim(ClaimTypes.Role, empleado.Rol!.Trim()),
+                new Claim(ClaimTypes.Role, empleado.Rol!.Trim()), // Rol es seguro aquí por la validación previa
                 new Claim("centro_medico_id", empleado.CentroMedicoId!.Value.ToString())
             };
 
@@ -118,20 +134,20 @@ namespace MedicalCenter.API.Controllers
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
-        // --- TOKEN PACIENTE (SIN "TRUCOS") ---
         private string GenerateJwtTokenPaciente(Paciente paciente)
         {
             var jwtKey = _configuration["JWT:Key"];
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!));
+            if (string.IsNullOrEmpty(jwtKey)) throw new Exception("Falta configuración JWT:Key");
+
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new List<Claim>
             {
-                // Solo la identidad del paciente
                 new Claim(ClaimTypes.NameIdentifier, paciente.Id.ToString()),
                 new Claim(ClaimTypes.GivenName, paciente.Nombre),
-                new Claim(ClaimTypes.Surname, paciente.Apellido)
-                // ¡SIN ROL Y SIN CENTRO ID!
+                new Claim(ClaimTypes.Surname, paciente.Apellido),
+                new Claim(ClaimTypes.Role, "PACIENTE") // Rol explícito para control en frontend
             };
 
             var token = new JwtSecurityToken(
