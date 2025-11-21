@@ -151,18 +151,48 @@ namespace MedicalCenter.API.Controllers
 
         // DELETE: api/ConsultasMedicas/5
         [HttpDelete("{id}")]
-        [Authorize(Roles = "ADMINISTRATIVO")]
+        // 1. SOLUCIÓN AL ERROR 403: Agregamos "MEDICO" a los roles permitidos
+        [Authorize(Roles = "ADMINISTRATIVO, MEDICO")]
         public async Task<IActionResult> DeleteConsultaMedica(int id)
         {
             var centroId = GetCentroIdFromToken();
             if (!centroId.HasValue) return Unauthorized();
+
+            // Nota: Si quisieras que solo el médico dueño pueda borrarla, aquí añadirías esa validación extra.
             if (centroId.Value == 1) return Forbid();
 
             using (var context = GetContextFromToken(centroId.Value))
             {
+                // Buscar la consulta
                 var consulta = await context.ConsultasMedicas.FindAsync(id);
                 if (consulta == null) return NotFound();
 
+                // 2. SOLUCIÓN PREVENTIVA AL ERROR 500 (Foreign Key):
+                // Antes de borrar la consulta, debemos borrar sus diagnósticos y prescripciones asociadas.
+                // Como no tienes la propiedad de navegación 'Diagnosticos' en tu modelo ConsultaMedica,
+                // los buscamos manualmente:
+
+                var diagnosticosAsociados = await context.Diagnosticos
+                    .Where(d => d.ConsultaId == id)
+                    .Include(d => d.Prescripciones) // Incluimos nietos (prescripciones)
+                    .ToListAsync();
+
+                foreach (var diagnostico in diagnosticosAsociados)
+                {
+                    // Borrar prescripciones del diagnóstico
+                    if (diagnostico.Prescripciones != null && diagnostico.Prescripciones.Any())
+                    {
+                        context.Prescripciones.RemoveRange(diagnostico.Prescripciones);
+                    }
+                }
+
+                // Borrar los diagnósticos
+                if (diagnosticosAsociados.Any())
+                {
+                    context.Diagnosticos.RemoveRange(diagnosticosAsociados);
+                }
+
+                // 3. Finalmente borramos la consulta (ahora limpia de hijos)
                 context.ConsultasMedicas.Remove(consulta);
                 await context.SaveChangesAsync();
             }

@@ -217,21 +217,30 @@ namespace MedicalCenter.API.Controllers
                 return Unauthorized("Token de usuario no contiene un 'centro_medico_id' válido.");
             }
 
-            // --- ¡SOLUCIÓN! ---
             if (centroId.Value == 1)
             {
                 return Forbid("El administrador global no puede eliminar diagnósticos.");
             }
-            // --- Fin de la solución ---
 
             using (var _context = GetContextFromToken(centroId.Value))
             {
-                var diagnostico = await _context.Diagnosticos.FindAsync(id);
+                // 1. Buscamos el diagnóstico INCLUYENDO sus prescripciones (Importante)
+                var diagnostico = await _context.Diagnosticos
+                    .Include(d => d.Prescripciones) // <--- Esto carga los hijos
+                    .FirstOrDefaultAsync(d => d.Id == id);
+
                 if (diagnostico == null)
                 {
                     return NotFound();
                 }
 
+                // 2. Eliminamos explícitamente las prescripciones hijas primero
+                if (diagnostico.Prescripciones != null && diagnostico.Prescripciones.Any())
+                {
+                    _context.Prescripciones.RemoveRange(diagnostico.Prescripciones);
+                }
+
+                // 3. Ahora sí eliminamos el padre (Diagnóstico) sin violar la FK
                 _context.Diagnosticos.Remove(diagnostico);
                 await _context.SaveChangesAsync();
 
