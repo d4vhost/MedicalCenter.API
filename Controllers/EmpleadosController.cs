@@ -43,7 +43,6 @@ namespace MedicalCenter.API.Controllers
         }
 
         // PUT: api/Empleados/5
-        // ✅ CAMBIO CLAVE: Recibimos 'EmpleadoUpdateDto' en lugar de 'Empleado'
         [HttpPut("{id}")]
         public async Task<IActionResult> PutEmpleado(int id, EmpleadoUpdateDto empleadoDto)
         {
@@ -52,7 +51,7 @@ namespace MedicalCenter.API.Controllers
                 return BadRequest("El ID de la URL no coincide con el ID del cuerpo de la solicitud.");
             }
 
-            // 1. BUSCAR EL EMPLEADO EXISTENTE EN LA BD (Para editarlo)
+            // 1. BUSCAR EL EMPLEADO EXISTENTE EN LA BD
             var empleadoExistente = await _context.Empleados.FindAsync(id);
 
             if (empleadoExistente == null)
@@ -60,23 +59,22 @@ namespace MedicalCenter.API.Controllers
                 return NotFound();
             }
 
-            // 2. ACTUALIZAR CAMPOS DE DATOS MANUALMENTE
-            // Pasamos los datos del DTO a la Entidad de base de datos
+            // 2. ACTUALIZAR CAMPOS DE DATOS
             empleadoExistente.Cedula = empleadoDto.Cedula;
             empleadoExistente.Nombre = empleadoDto.Nombre;
             empleadoExistente.Apellido = empleadoDto.Apellido;
-            empleadoExistente.Rol = empleadoDto.Rol;
             empleadoExistente.CentroMedicoId = empleadoDto.CentroMedicoId;
 
+            if (!string.IsNullOrEmpty(empleadoDto.Rol))
+            {
+                empleadoExistente.Rol = empleadoDto.Rol;
+            }
+
             // 3. ACTUALIZAR CONTRASEÑA SOLO SI SE ENVÍA UNA NUEVA
-            // Como en el UpdateDto la password es opcional (string?), esto no fallará si viene vacía.
             if (!string.IsNullOrEmpty(empleadoDto.Password))
             {
-                // Aquí podrías agregar el hasheo si tuvieras el método
                 empleadoExistente.Password = empleadoDto.Password;
             }
-            // Si empleadoDto.Password es null o vacío, simplemente NO tocamos empleadoExistente.Password
-            // manteniendo la contraseña vieja.
 
             try
             {
@@ -98,7 +96,6 @@ namespace MedicalCenter.API.Controllers
         }
 
         // POST: api/Empleados
-        // ✅ CAMBIO: Usamos 'EmpleadoCreateDto' para la creación
         [HttpPost]
         public async Task<ActionResult<Empleado>> PostEmpleado(EmpleadoCreateDto empleadoDto)
         {

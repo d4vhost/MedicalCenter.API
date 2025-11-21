@@ -47,8 +47,43 @@ namespace MedicalCenter.API.Controllers
         {
             var centroId = GetCentroIdFromToken();
             if (!centroId.HasValue) return Unauthorized("Token inválido: falta centro_medico_id.");
-            if (centroId.Value == 1) return Ok(new List<ConsultaMedica>());
 
+            // --- CAMBIO PRINCIPAL AQUÍ ---
+
+            // CASO 1: Si es el ADMIN CENTRAL (Quito/Global - ID 1)
+            // Debe conectarse a Guayaquil (2) y Cuenca (3) para traer todo.
+            if (centroId.Value == 1)
+            {
+                var listaUnificada = new List<ConsultaMedica>();
+                // IDs de tus nodos esclavos definidos en el Factory
+                int[] nodosEsclavos = { 2, 3 };
+
+                foreach (var nodoId in nodosEsclavos)
+                {
+                    try
+                    {
+                        // Usamos la fábrica para crear una conexión temporal a cada nodo
+                        using (var context = _localContextFactory.CreateDbContext(nodoId))
+                        {
+                            var consultasNodo = await context.ConsultasMedicas.ToListAsync();
+                            listaUnificada.AddRange(consultasNodo);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Si un nodo está apagado (ej. Cuenca caído), capturamos el error
+                        // para que no falle toda la petición y al menos muestre los otros.
+                        // Aquí podrías loguear el error si quisieras.
+                        continue;
+                    }
+                }
+
+                // Retornamos la lista combinada y ordenada por fecha
+                return Ok(listaUnificada.OrderByDescending(c => c.FechaHora));
+            }
+
+            // CASO 2: Si es un MÉDICO o ADMIN LOCAL (Guayaquil o Cuenca)
+            // Solo devuelve sus propios datos (comportamiento original).
             using (var context = GetContextFromToken(centroId.Value))
             {
                 return await context.ConsultasMedicas
