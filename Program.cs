@@ -15,7 +15,10 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend",
         policy =>
         {
-            policy.WithOrigins("http://localhost:5173") // Asegúrate que sea el puerto de tu Vue
+            policy.WithOrigins(
+                    "https://medicalcenterbd.netlify.app", // 1. Tu Frontend PUBLICADO (Producción)
+                    "http://localhost:5173"                // 2. Tu Frontend LOCAL (Para seguir desarrollando)
+                   )
                    .AllowAnyHeader()
                    .AllowAnyMethod();
         });
@@ -90,7 +93,7 @@ app.UseHttpsRedirection();
 app.UseRouting();
 
 // Habilita la política de CORS que definimos arriba
-app.UseCors("AllowFrontend"!); // El '!' es para silenciar la advertencia (sabemos que no es nulo)
+app.UseCors("AllowFrontend"); // El '!' es para silenciar la advertencia (sabemos que no es nulo)
 
 // ¡¡MUY IMPORTANTE!! Habilitar Autenticación y Autorización
 // Deben ir en este orden (primero autenticar, luego autorizar)
